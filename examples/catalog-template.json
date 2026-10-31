@@ -1,0 +1,10 @@
+{
+  "schema": "lazy-catalog/1",
+  "catalog": {
+    "id": "sample-extra",
+    "name": "Пример дополнительного каталога",
+    "items": [{"id":"sample-table","name":"Стол 140 × 70","kind":"desk","size":[140,70,75],"material":"sample-oak"}]
+  },
+  "materials": [{"id":"sample-oak","name":"Дуб · пример","kind":"wood","color":"#c3a278","roughness":0.6,"scaleCm":90,"reliefMm":0.2}],
+  "assets": {}
+}

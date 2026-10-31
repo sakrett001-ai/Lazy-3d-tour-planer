@@ -1,0 +1,8 @@
+{
+  "task": "lazy-3d-tour-planer-bootstrap",
+  "phase": "browser-validation",
+  "status": "in-progress",
+  "completed": ["general-engine-copy", "project-contract", "editor", "subset-offline-export", "13-core-tests"],
+  "next": ["browser-workflows", "visual-review", "final-verification"],
+  "clientAssetsIncluded": false
+}

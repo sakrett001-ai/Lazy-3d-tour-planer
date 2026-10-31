@@ -1,0 +1,16 @@
+Lazy 3D Tour Planer
+
+The repository retains its owner's Apache License 2.0.
+The general interior-tour engine was carried over from the owner's design-interiors
+toolkit. The planner schema, editor, packager and procedural material adapter
+are extensions for this repository. Customer-specific layouts, photographs,
+logos, audio and furniture libraries are not included.
+
+Third-party components:
+engine/runtime/three.min.js — Three.js revision 160.
+engine/runtime/gltf-addons.js — Three.js 0.160 GLTFLoader/GLTFExporter bundle.
+Copyright 2010–2023 Three.js Authors. MIT: licenses/threejs-MIT.txt.
+Upstream: https://github.com/mrdoob/three.js/tree/r160
+
+Blender, StableGen, neural-network weights and inference services are not bundled.
+Optional conversion scripts require separately installed software.

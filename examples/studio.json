@@ -1,0 +1,50 @@
+{
+ "schema":"lazy-tour/1","mode":"author","units":"cm",
+ "meta":{"id":"studio-01","name":"Студия · рабочее пространство","version":1},
+ "walls":[
+  {"id":"north","a":[0,0],"b":[600,0],"thickness":20,"height":300,"material":"plaster","openings":[{"id":"window-1","type":"window","offset":170,"width":200,"sill":85,"height":155}]},
+  {"id":"east","a":[600,0],"b":[600,450],"thickness":20,"height":300,"material":"plaster","openings":[]},
+  {"id":"south","a":[600,450],"b":[0,450],"thickness":20,"height":300,"material":"plaster","openings":[{"id":"door-1","type":"door","offset":60,"width":90,"sill":0,"height":210,"hinge":"s","swing":1}]},
+  {"id":"west","a":[0,450],"b":[0,0],"thickness":20,"height":300,"material":"fluted","openings":[]}
+ ],
+ "rooms":[{"id":"room-1","name":"Рабочее пространство","polygon":[[0,0],[600,0],[600,450],[0,450]],"material":"wood-floor"}],
+ "instances":[
+  {"id":"desk-1","assetId":"desk-oak","x":170,"y":150,"z":0,"rotation":0},
+  {"id":"chair-1","assetId":"chair-task","x":170,"y":245,"z":0,"rotation":180},
+  {"id":"sofa-1","assetId":"sofa-two","x":450,"y":95,"z":0,"rotation":180},
+  {"id":"cabinet-1","assetId":"cabinet-low","x":75,"y":370,"z":0,"rotation":0}
+ ],
+ "fixtures":[
+  {"id":"lamp-1","kind":"panel","x":190,"y":180,"height":290,"rotation":0,"width":100,"depth":35,"temperature":4000,"power":12},
+  {"id":"lamp-2","kind":"spot","x":440,"y":160,"height":290,"temperature":3000,"power":8},
+  {"id":"socket-1","kind":"socket","wallId":"north","offset":95,"side":1,"height":30},
+  {"id":"switch-1","kind":"switch","wallId":"south","offset":160,"side":1,"height":95}
+ ],
+ "materials":[
+  {"id":"plaster","name":"Тёплая штукатурка","kind":"plaster","color":"#e5dfd2","roughness":0.86,"scaleCm":70,"reliefMm":0.6},
+  {"id":"fluted","name":"Рельефные рейки","kind":"fluted","color":"#c5ac88","roughness":0.64,"scaleCm":32,"reliefMm":8},
+  {"id":"brick","name":"Кирпичная кладка","kind":"brick","color":"#b88166","roughness":0.89,"scaleCm":52,"reliefMm":4},
+  {"id":"wood-floor","name":"Светлый дуб · пол","kind":"wood","color":"#cfb48b","roughness":0.64,"scaleCm":180,"reliefMm":0.25},
+  {"id":"wood","name":"Дуб натуральный","kind":"wood","color":"#c7a278","roughness":0.54,"scaleCm":90,"reliefMm":0.2},
+  {"id":"weave","name":"Рогожка · шалфей","kind":"weave","color":"#87938a","roughness":0.92,"scaleCm":6.4,"reliefMm":0.55},
+  {"id":"leather","name":"Кожа · графит","kind":"leather","color":"#44494c","roughness":0.65,"scaleCm":10,"reliefMm":0.16},
+  {"id":"white","name":"Белый матовый","kind":"paint","color":"#ecebe5","roughness":0.74,"scaleCm":100,"reliefMm":0}
+ ],
+ "catalogs":[
+  {"id":"work","name":"Рабочее место","items":[
+   {"id":"desk-oak","name":"Стол прямой","kind":"desk","size":[160,80,75],"material":"wood"},
+   {"id":"chair-task","name":"Рабочее кресло","kind":"chair","size":[64,64,112],"material":"leather"},
+   {"id":"cabinet-low","name":"Низкий шкаф","kind":"cabinet","size":[120,45,85],"material":"white"},
+   {"id":"table-meeting","name":"Переговорный стол","kind":"table","size":[220,100,75],"material":"wood"}
+  ]},
+  {"id":"lounge","name":"Зона отдыха","items":[
+   {"id":"sofa-two","name":"Двухместный диван","kind":"sofa","size":[180,85,85],"material":"weave"},
+   {"id":"table-round","name":"Круглый столик","kind":"roundTable","size":[60,60,48],"material":"wood"},
+   {"id":"plant-tall","name":"Растение в кашпо","kind":"plant","size":[65,65,130],"material":"white"}
+  ]}
+ ],
+ "assets":{},
+ "selection":{"items":["desk-oak","chair-task","cabinet-low","table-meeting","sofa-two","table-round","plant-tall"],"materials":["plaster","fluted","brick","wood-floor","wood","weave","leather","white"]},
+ "lighting":{"preset":"day","naturalTemperature":5500,"naturalPower":1,"exposure":1},
+ "policy":{"furniture":true,"finishes":true}
+}
