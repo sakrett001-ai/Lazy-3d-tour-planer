@@ -4,7 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="color-scheme" content="light" />
-    <title>Lazy 3D · Планировщик пространств</title>
+    <meta
+      name="description"
+      content="Станция дизайна интерьера: планировки, мебель, отделка, свет и автономные 3D-туры."
+    />
+    <title>Lazy 3D · Станция дизайна интерьера</title>
     <link rel="stylesheet" href="/app/style.css" />
   </head>
   <body>
@@ -30,6 +34,14 @@
         </button>
       </div>
     </header>
+    <nav class="stationbar" data-author aria-label="Станция дизайна">
+      <span class="station-label">СТАНЦИЯ ИНТЕРЬЕРА <span>/ Планировочное решение</span></span>
+      <div>
+        <button id="newDesign">Новый проект</button>
+        <button id="designVariants">Варианты <span id="variantCount">0</span></button>
+        <button id="designSheet">Лист плана ↗</button>
+      </div>
+    </nav>
     <div class="workspace">
       <nav class="tools" aria-label="Инструменты построения">
         <button
@@ -214,6 +226,118 @@
       ><button id="mobileExport">Выгрузить тур</button>
     </div>
     <div id="notice" role="status" aria-live="polite" hidden></div>
+    <dialog id="newDesignDialog" aria-labelledby="newDesignTitle">
+      <button data-close="newDesignDialog" class="quiet close-dialog">Закрыть</button>
+      <div class="eyebrow">LAZY 3D / НОВОЕ ПРОСТРАНСТВО</div>
+      <h2 id="newDesignTitle">Начните с размеров.</h2>
+      <p>Создайте помещение, затем добавьте перегородки, мебель, фактуры и свет.</p>
+      <form id="newDesignForm">
+        <label class="field"
+          >Название проекта<input id="designName" value="Мой интерьер" required maxlength="200"
+        /></label>
+        <div class="property-grid">
+          <label class="field"
+            >Ширина внутри, см<input
+              id="designWidth"
+              type="number"
+              value="600"
+              min="150"
+              max="3000"
+              required
+          /></label>
+          <label class="field"
+            >Глубина внутри, см<input
+              id="designDepth"
+              type="number"
+              value="450"
+              min="150"
+              max="3000"
+              required
+          /></label>
+          <label class="field"
+            >Высота, см<input
+              id="designHeight"
+              type="number"
+              value="280"
+              min="200"
+              max="600"
+              required
+          /></label>
+          <label class="field"
+            >Толщина стен, см<input
+              id="designThickness"
+              type="number"
+              value="15"
+              min="5"
+              max="60"
+              required
+          /></label>
+        </div>
+        <label class="checkbox-field"
+          ><input id="designOpenings" type="checkbox" checked />Добавить входную дверь и окно</label
+        >
+        <p id="designArea" class="design-area"></p>
+        <button class="primary" type="submit">Создать помещение</button>
+        <button id="demoDesign" type="button" class="quiet">Открыть демопроект</button>
+        <p class="help-note">
+          Текущий проект можно вернуть через «Отменить». Сохраните его в файл для длительного
+          хранения.
+        </p>
+      </form>
+    </dialog>
+    <dialog id="variantsDialog" class="wide-dialog" aria-labelledby="variantsTitle">
+      <button data-close="variantsDialog" class="quiet close-dialog">Закрыть</button>
+      <div class="eyebrow">ПЛАНИРОВОЧНЫЕ РЕШЕНИЯ</div>
+      <h2 id="variantsTitle">Один интерьер. Разные варианты.</h2>
+      <p>Снимок сохраняет план, расстановку, отделку и свет. Открытие варианта можно отменить.</p>
+      <form id="variantForm" class="variant-form">
+        <label class="field"
+          >Название варианта<input
+            id="variantName"
+            placeholder="Например, рабочее место у окна"
+            maxlength="120"
+            required
+        /></label>
+        <button class="primary" type="submit">Сохранить вариант</button>
+      </form>
+      <div id="variantList" class="variant-list"></div>
+      <div class="dialog-footer">
+        <button id="saveDesignBook" class="outline">Скачать проект со всеми вариантами</button
+        ><span class="help-note">До 12 вариантов. Открывается кнопкой «Открыть».</span>
+      </div>
+    </dialog>
+    <dialog id="sheetDialog" class="wide-dialog sheet-dialog" aria-labelledby="sheetTitle">
+      <button data-close="sheetDialog" class="quiet close-dialog">Закрыть</button>
+      <div class="eyebrow">ДЛЯ ОБСУЖДЕНИЯ ПРОЕКТА</div>
+      <h2 id="sheetTitle">План и комплектация.</h2>
+      <div class="sheet-actions">
+        <button id="downloadPlan" class="primary">Скачать план SVG</button
+        ><button id="downloadSchedule" class="outline">Мебель CSV</button
+        ><button id="downloadStation" class="quiet">Скачать станцию HTML</button>
+      </div>
+      <div id="sheetPreview" class="sheet-preview"></div>
+      <div class="schedule-wrap">
+        <table>
+          <caption>
+            Мебель на плане
+          </caption>
+          <thead>
+            <tr>
+              <th>Изделие</th>
+              <th>Кол-во</th>
+              <th>Ш × Г × В, см</th>
+              <th>Материал</th>
+            </tr>
+          </thead>
+          <tbody id="scheduleRows"></tbody>
+        </table>
+      </div>
+      <p class="help-note">
+        SVG — векторный лист для печати и обсуждения, CSV — список расставленных изделий. HTML
+        содержит редактор и текущий проект, работает без установки. Варианты сохраняются отдельно в
+        файле проекта со всеми вариантами.
+      </p>
+    </dialog>
     <dialog id="helpDialog">
       <button id="closeHelp" class="quiet close-dialog">Закрыть</button>
       <h2>От плана — к пространству</h2>

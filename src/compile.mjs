@@ -214,11 +214,16 @@ parent.postMessage({type:'lazy-render-ready',items:PROJECT_ITEMS.length},'*');
   return html.split('{{SCRIPTS}}').join(blocks.join('\n'));
 }
 export function createOfflineHTML(input, bundle, app) {
-  const p = assertAssetDimensions(packageProject(input));
+  return assembleAppHTML(assertAssetDimensions(packageProject(input)), bundle, app);
+}
+export function createStationHTML(input, bundle, app) {
+  const p = assertAssetDimensions(assertProject(clone(input)));
+  if (p.mode !== 'author') throw new Error('Станцию можно собрать только из авторского проекта');
+  return assembleAppHTML(p, bundle, app);
+}
+function assembleAppHTML(p, bundle, app) {
   const classic = (s) => s.replace(/^import\s[\s\S]*?;\s*/gm, '').replace(/^export /gm, '');
-  const code = [classic(app.domain), classic(app.glb), classic(app.compiler), classic(app.js)].join(
-    '\n',
-  );
+  const code = [app.domain, app.glb, app.compiler, app.station, app.js].map(classic).join('\n');
   const embed = { project: p, bundle, app };
   const policy = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src data: blob:; frame-src blob:; child-src blob:; connect-src data: blob:; font-src data:;">`;
   let html = app.html.replace(

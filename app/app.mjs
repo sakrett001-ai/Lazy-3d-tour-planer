@@ -19,8 +19,15 @@ import {
   restoreVariant,
   planIssues,
 } from '../src/project.mjs';
-import { createTourHTML, createOfflineHTML, htmlText } from '../src/compile.mjs';
+import { createTourHTML, createOfflineHTML, createStationHTML, htmlText } from '../src/compile.mjs';
 import { inspectGLB, assertAssetDimensions } from '../src/glb.mjs';
+import {
+  createRoomProject,
+  designBook,
+  planSVG,
+  furnitureSchedule,
+  scheduleCSV,
+} from '../src/station.mjs';
 
 const $ = (id) => document.getElementById(id),
   esc = htmlText;
@@ -37,6 +44,8 @@ let doc,
   pointer = null,
   drag = null,
   spaceDown = false;
+let variants = [],
+  variantsProjectId = null;
 let past = [],
   future = [],
   viewBox = [-100, -100, 800, 650],
@@ -72,6 +81,7 @@ const materialNames = {
 const author = () => doc.mode === 'author';
 function notify(message, error = false) {
   clearTimeout(noticeTimer);
+  (document.querySelector('dialog[open]') || document.body).append($('notice'));
   $('notice').textContent = message;
   $('notice').style.background = error ? '#813b32' : '#233b30';
   $('notice').hidden = false;
@@ -102,6 +112,7 @@ function commit(next, selection = selected) {
   if (past.length > 40) past.shift();
   future = [];
   doc = next;
+  loadVariants();
   selected = selection;
   frameDirty = true;
   render();
@@ -122,6 +133,7 @@ function undo(redo = false) {
   if (!from.length) return;
   to.push(clone(doc));
   doc = from.pop();
+  loadVariants();
   selected = null;
   frameDirty = true;
   render();
@@ -510,7 +522,7 @@ function projectProperties() {
     (author()
       ? section(
           'Файлы',
-          `<button class="outline" data-command="new">Новый проект 6 × 4,5 м</button><p>Текущую работу можно вернуть отменой действия.</p>`,
+          `<button class="outline" data-command="new">Новый проект по размерам</button><p>Варианты, лист плана и комплектация доступны в меню станции.</p>`,
         )
       : '')
   );
@@ -790,13 +802,7 @@ function command(cmd) {
     return;
   }
   if (cmd === 'new') {
-    const p = clone(initial);
-    p.meta.id = newId('project');
-    p.meta.name = 'Новый проект';
-    p.instances = [];
-    p.fixtures = [];
-    commit(p, null);
-    fitPlan();
+    openNewDesign();
     return;
   }
   if (!selected) return;
@@ -988,6 +994,7 @@ function placeAt(pt, target) {
 }
 function render() {
   document.body.classList.toggle('exported', !author());
+  $('variantCount').textContent = variants.length;
   $('projectName').value = doc.meta.name;
   $('undo').disabled = !past.length;
   $('redo').disabled = !future.length;
@@ -1126,7 +1133,178 @@ async function importCatalog(file) {
   commit(p, null);
   notify('Каталог добавлен');
 }
+function loadVariants() {
+  if (variantsProjectId === doc.meta.id) return;
+  variantsProjectId = doc.meta.id;
+  variants = [];
+  if (!author()) return;
+  try {
+    const raw = localStorage.getItem('Lazy3D-v2-variants-' + doc.meta.id);
+    if (raw) variants = designBook(doc, JSON.parse(raw)).variants;
+  } catch {
+    /* A corrupt or unavailable cache must not prevent opening a project. */
+  }
+}
+function persistVariants() {
+  try {
+    localStorage.setItem('Lazy3D-v2-variants-' + doc.meta.id, JSON.stringify(variants));
+    return true;
+  } catch {
+    notify(
+      'Варианты доступны в этой вкладке. Скачайте проект со всеми вариантами: память браузера заполнена или недоступна.',
+      true,
+    );
+    return false;
+  }
+}
+function openNewDesign() {
+  if (!author()) return;
+  updateDesignArea();
+  $('newDesignDialog').showModal();
+}
+function updateDesignArea() {
+  const area = (Number($('designWidth').value) * Number($('designDepth').value)) / 10000;
+  $('designArea').textContent =
+    Number.isFinite(area) && area > 0
+      ? area.toFixed(1) + ' м² · чистый размер внутри стен'
+      : 'Укажите размеры помещения';
+}
+function renderVariants() {
+  $('variantCount').textContent = variants.length;
+  $('variantList').innerHTML = variants.length
+    ? variants
+        .map(
+          (v) =>
+            `<article class="variant-card"><div class="variant-preview">${planSVG(v.project)}</div><h3>${esc(v.name)}</h3><p>Мебель: ${v.project.instances.length} · ${v.project.rooms.length} пом. · ${{ day: 'Дневной', work: 'Рабочий', sunset: 'Закат', evening: 'Вечер' }[v.project.lighting.preset]} свет</p><div><button class="outline" data-open-variant="${v.id}">Открыть вариант</button><button class="quiet" data-delete-variant="${v.id}" aria-label="Удалить вариант ${esc(v.name)}">Удалить</button></div></article>`,
+        )
+        .join('')
+    : '<div class="variants-empty"><span>01 / Первый вариант</span><p>Сохраните текущую расстановку, чтобы сравнить её со следующей идеей.</p></div>';
+  $('variantList')
+    .querySelectorAll('[data-open-variant]')
+    .forEach(
+      (b) =>
+        (b.onclick = () => {
+          const v = variants.find((v) => v.id === b.dataset.openVariant);
+          commit(clone(v.project), null);
+          setTool('select');
+          fitPlan();
+          $('variantsDialog').close();
+          notify(
+            'Открыт вариант «' + v.name + '». Предыдущую работу можно вернуть через «Отменить».',
+          );
+        }),
+    );
+  $('variantList')
+    .querySelectorAll('[data-delete-variant]')
+    .forEach(
+      (b) =>
+        (b.onclick = () => {
+          variants = variants.filter((v) => v.id !== b.dataset.deleteVariant);
+          persistVariants();
+          renderVariants();
+        }),
+    );
+}
+function openSheet() {
+  if (!author()) return;
+  $('sheetPreview').innerHTML = planSVG(doc);
+  $('scheduleRows').innerHTML =
+    furnitureSchedule(doc)
+      .map(
+        (r) =>
+          `<tr><td>${esc(r.name)}</td><td>${r.count}</td><td>${r.size.join(' × ')}</td><td>${esc(r.material)}</td></tr>`,
+      )
+      .join('') || '<tr><td colspan="4">Мебель ещё не расставлена</td></tr>';
+  $('sheetDialog').showModal();
+}
+function bindStation() {
+  $('newDesign').onclick = openNewDesign;
+  $('designVariants').onclick = () => {
+    renderVariants();
+    $('variantsDialog').showModal();
+  };
+  $('designSheet').onclick = openSheet;
+  document
+    .querySelectorAll('[data-close]')
+    .forEach((b) => (b.onclick = () => $(b.dataset.close).close()));
+  $('designWidth').oninput = $('designDepth').oninput = updateDesignArea;
+  $('newDesignForm').onsubmit = (e) => {
+    e.preventDefault();
+    try {
+      const p = createRoomProject(doc, {
+        name: $('designName').value,
+        width: Number($('designWidth').value),
+        depth: Number($('designDepth').value),
+        height: Number($('designHeight').value),
+        thickness: Number($('designThickness').value),
+        openings: $('designOpenings').checked,
+      });
+      commit(p, null);
+      setTool('select');
+      setView('plan');
+      fitPlan();
+      $('newDesignDialog').close();
+      notify('Помещение создано. Добавьте мебель из библиотеки или нарисуйте перегородки.');
+    } catch (err) {
+      notify(err.message, true);
+    }
+  };
+  $('demoDesign').onclick = () => {
+    const p = clone(initial);
+    p.meta.id = newId('project');
+    commit(p, null);
+    setTool('select');
+    setView('plan');
+    fitPlan();
+    $('newDesignDialog').close();
+  };
+  $('variantForm').onsubmit = (e) => {
+    e.preventDefault();
+    try {
+      variants = designBook(doc, [
+        ...variants,
+        { id: newId('variant'), name: $('variantName').value.trim(), project: doc },
+      ]).variants;
+      const saved = persistVariants();
+      $('variantName').value = '';
+      renderVariants();
+      if (saved)
+        notify('Вариант сохранён в этом браузере. Скачайте все варианты для резервной копии.');
+    } catch (err) {
+      notify(err.message, true);
+    }
+  };
+  $('saveDesignBook').onclick = () => {
+    try {
+      const content = JSON.stringify(designBook(doc, variants));
+      if (new Blob([content]).size > 72 * 1024 * 1024)
+        throw new Error(
+          'Файл с вариантами превышает 72 МБ. Уменьшите число вариантов или сохраните их отдельными проектами.',
+        );
+      download(doc.meta.id + '-design.lazy.json', content, 'application/json');
+      notify('Проект и все варианты сохранены в файл');
+    } catch (err) {
+      notify(err.message, true);
+    }
+  };
+  $('downloadPlan').onclick = () =>
+    download(doc.meta.id + '-plan.svg', planSVG(doc), 'image/svg+xml');
+  $('downloadSchedule').onclick = () =>
+    download(doc.meta.id + '-furniture.csv', scheduleCSV(doc), 'text/csv;charset=utf-8');
+  $('downloadStation').onclick = () => {
+    try {
+      download(
+        'lazy-interior-station.html',
+        createStationHTML(doc, bundle, appSources),
+        'text/html',
+      );
+    } catch (err) {
+      notify(err.message, true);
+    }
+  };
+}
 function bind() {
+  bindStation();
   document
     .querySelectorAll('[data-tool]')
     .forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
@@ -1160,11 +1338,23 @@ function bind() {
   $('projectFile').onchange = async (e) => {
     try {
       if (e.target.files[0]) {
+        const data = await fileJSON(e.target.files[0]);
+        const book =
+          data.schema === 'lazy-station/1' ? designBook(data.project, data.variants) : null;
+        if (book && !author())
+          throw new Error('Файл со всеми вариантами открывается в авторской станции');
+        if (book) for (const v of book.variants) assertAssetDimensions(v.project);
         const p = restoreVariant(
           doc,
-          assertAssetDimensions(assertProject(await fileJSON(e.target.files[0]))),
+          assertAssetDimensions(assertProject(book ? book.project : data)),
         );
         commit(p, null);
+        if (book) {
+          variants = book.variants;
+          persistVariants();
+          $('variantCount').textContent = variants.length;
+        }
+        setTool('select');
         fitPlan();
         notify('Проект открыт');
       }
@@ -1354,7 +1544,10 @@ function bind() {
     drag = null;
   });
   addEventListener('keydown', (e) => {
-    if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName) || $('helpDialog').open)
+    if (
+      /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName) ||
+      document.querySelector('dialog[open]')
+    )
       return;
     if (e.code === 'Space') {
       spaceDown = true;
@@ -1432,6 +1625,7 @@ async function boot() {
     } catch {
       /* Keep the validated source when a local cache is incompatible. */
     }
+    loadVariants();
     bind();
     render();
     fitPlan();

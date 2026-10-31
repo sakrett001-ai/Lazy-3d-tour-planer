@@ -1,0 +1,19 @@
+{
+  "task": "lazy-interior-station",
+  "version": "0.2.0",
+  "state": "ready-to-deliver",
+  "goal": "Interior planning station with runnable link from GitHub",
+  "site": "https://lazy-interior-station.sakretsu.chatgpt.site",
+  "project_id": "appgprj_6ae5fbf1cd048191a0d2471cc97d8c25",
+  "site_commit": "a411287cd359de0f0398c520c6458028583e6d33",
+  "deployment_id": "appgdep_6ae6036ad224819198d1a96c6d85f946",
+  "deployment_status": "succeeded",
+  "audience": "owner-private",
+  "verification": "npm test: 24 passed; static author UI, room wizard, snapshot, JSON download/reopen, SVG display and CSV download inspected in browser",
+  "limits": "Cloud Chrome has no WebGL context; HTML/SVG download event times out. Full current-version Playwright suite not run.",
+  "constraints": [
+    "Do not inspect or troubleshoot GitHub Actions",
+    "No customer brands or assets"
+  ],
+  "next_action": "Deliver the published station link and GitHub README; subsequent work can extend the shared project format"
+}

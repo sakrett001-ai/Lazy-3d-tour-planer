@@ -263,6 +263,7 @@ try {
   await page.locator('[data-view="plan"]').click();
   await page.locator('#issuesButton').click();
   await page.locator('[data-command="new"]').click();
+  await page.locator('#newDesignForm button[type="submit"]').click();
   await page.locator('#projectName').fill('Проверка восстановления');
   await page.locator('#projectName').press('Tab');
   const savedID = (await project(page)).meta.id;

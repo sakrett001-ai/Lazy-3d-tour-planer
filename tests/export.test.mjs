@@ -9,9 +9,26 @@ import { runtimeBundle, appBundle, createServer } from '../server.mjs';
 import { createOfflineHTML, createTourHTML, engineProject } from '../src/compile.mjs';
 import { inspectGLB } from '../src/glb.mjs';
 import { restoreVariant, packageProject } from '../src/project.mjs';
+import * as compiler from '../src/compile.mjs';
 const require = createRequire(import.meta.url),
   sample = () =>
     fs.readFile(new URL('../examples/studio.json', import.meta.url), 'utf8').then(JSON.parse);
+test('самостоятельная станция сохраняет авторский режим и полный каталог', async () => {
+  assert.equal(typeof compiler.createStationHTML, 'function', 'Нужен самостоятельный HTML автора');
+  const p = await sample();
+  p.selection.items = ['desk-oak'];
+  const html = compiler.createStationHTML(p, await runtimeBundle(), await appBundle());
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  const sandbox = { window: {} };
+  for (const s of scripts) new vm.Script(s[1]);
+  vm.runInNewContext(scripts[0][1], sandbox);
+  const embedded = sandbox.window.LAZY_EMBED.project;
+  assert.equal(embedded.mode, 'author');
+  assert.equal(embedded.catalogs[0].items.length, p.catalogs[0].items.length);
+  assert.equal(embedded.selection.items.length, 1);
+  const markup = html.replace(/<script>[\s\S]*?<\/script>/g, '');
+  assert.ok(!/<(?:script|link)[^>]+(?:src|href)="\/(?:app|src)\//.test(markup));
+});
 test('экспорт содержит работающий JS и только разрешённый каталог', async () => {
   const p = await sample();
   p.instances = [];

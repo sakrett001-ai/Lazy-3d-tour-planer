@@ -32,6 +32,7 @@ export async function appBundle() {
     domain: 'src/project.mjs',
     compiler: 'src/compile.mjs',
     glb: 'src/glb.mjs',
+    station: 'src/station.mjs',
   };
   return Object.fromEntries(
     await Promise.all(
