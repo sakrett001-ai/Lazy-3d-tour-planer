@@ -148,9 +148,11 @@ function invalidateShadows(changed=null){
 
 const hemi = new THREE.HemisphereLight(0xdfe9f2, 0x8a8070, .35); scene.add(hemi);
 // окружение для PBR-отражений и мягкого заполняющего света
-(function envMap() {
+let ENV_TARGET=null,ENV_PRESET=null;
+function refreshEnvironment(preset=PROJECT.planner?.lighting.preset) {
+  if(PROJECT.planner&&ENV_PRESET===preset)return;
   const pm = new THREE.PMREMGenerator(renderer); const es = new THREE.Scene();
-  if(PROJECT.planner){plannerEnvironment(es);}else{
+  if(PROJECT.planner){plannerEnvironment(es,preset);}else{
   const room = new THREE.Mesh(new THREE.BoxGeometry(12, 5, 12), new THREE.MeshBasicMaterial({ color: 0x8c8983, side: THREE.BackSide })); room.position.y = 2; es.add(room);
   const flo = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.MeshBasicMaterial({ color: 0x9c968c })); flo.rotation.x = -Math.PI / 2; flo.position.y = -.4; es.add(flo);
   for (const [x, z, w, h, r, c] of [[0, -5.9, 5, 2.2, 0, 3.2], [5.9, 0, 4, 2.2, -Math.PI / 2, 2.4], [0, 5.9, 5, 2.2, Math.PI, 1.8], [0, 4.4, 6, 6, 0, 1.2]]) {
@@ -159,9 +161,11 @@ const hemi = new THREE.HemisphereLight(0xdfe9f2, 0x8a8070, .35); scene.add(hemi)
     es.add(p);
   }
   }
-  scene.environment = pm.fromScene(es, .08).texture;
+  if(ENV_TARGET?.dispose)ENV_TARGET.dispose();
+  ENV_TARGET=pm.fromScene(es,.08);scene.environment=ENV_TARGET.texture;ENV_PRESET=preset;
   pm.dispose();es.traverse(o=>{if(o.isMesh){o.geometry.dispose();o.material.dispose();}});
-})();
+}
+refreshEnvironment();
 
 /* ---------- режимы освещения ---------- */
 let lighting = 'day';

@@ -1,8 +1,21 @@
 {
   "task": "lazy-3d-tour-planer-bootstrap",
-  "phase": "browser-validation",
-  "status": "in-progress",
-  "completed": ["general-engine-copy", "project-contract", "editor", "subset-offline-export", "13-core-tests"],
-  "next": ["browser-workflows", "visual-review", "final-verification"],
+  "status": "verified",
+  "phase": "handoff",
+  "repository": "https://github.com/sakrett001-ai/Lazy-3d-tour-planer",
+  "criteria": {
+    "generalEngineWithoutClientAssets": "passed",
+    "planOpeningsFurnitureFixtures": "passed",
+    "scopedOfflineCatalogExport": "passed",
+    "saveRestoreAndBrowserFlows": "passed"
+  },
+  "verification": {
+    "nodeTests": 19,
+    "browserScenarios": 12,
+    "pageErrors": 0,
+    "offlineExternalRequests": 0,
+    "report": "docs/verification.md"
+  },
+  "next": "Develop roadmap items against the shared project contract",
   "clientAssetsIncluded": false
 }

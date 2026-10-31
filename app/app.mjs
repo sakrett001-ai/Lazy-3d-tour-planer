@@ -1,114 +1,1456 @@
-import {clone,newId,catalogItems,catalogItem,wallLength,wallPoint,projectOnWall,fixturePosition,bounds,polygonArea,itemPolygon,itemBounds,validateProject,assertProject,applyAction,packageSummary,packageProject,restoreVariant,planIssues} from '../src/project.mjs';
-import {createTourHTML,createOfflineHTML,htmlText} from '../src/compile.mjs';
-import {inspectGLB} from '../src/glb.mjs';
+import {
+  clone,
+  newId,
+  catalogItems,
+  catalogItem,
+  wallLength,
+  wallPoint,
+  projectOnWall,
+  fixturePosition,
+  bounds,
+  polygonArea,
+  itemPolygon,
+  itemBounds,
+  validateProject,
+  assertProject,
+  applyAction,
+  packageSummary,
+  packageProject,
+  restoreVariant,
+  planIssues,
+} from '../src/project.mjs';
+import { createTourHTML, createOfflineHTML, htmlText } from '../src/compile.mjs';
+import { inspectGLB, assertAssetDimensions } from '../src/glb.mjs';
 
-const $=id=>document.getElementById(id),esc=htmlText;
-let doc,bundle,appSources,initial,selected=null,tool='select',tab='catalog',view='plan',pendingAsset=null,draft=[],pointer=null,drag=null,spaceDown=false;
-let past=[],future=[],viewBox=[-100,-100,800,650],baseWidth=800,frameURL=null,frameDirty=true,frameToken=0,noticeTimer,saveTimer;
-const kindNames={desk:'Стол',chair:'Кресло',sofa:'Диван',cabinet:'Шкаф',table:'Стол',roundTable:'Столик',plant:'Растение',glb:'Модель',socket:'Розетка',switch:'Выключатель',panel:'Панель',spot:'Точечный свет'};
-const materialNames={paint:'Краска',plaster:'Штукатурка',brick:'Кирпич',fluted:'Рейки',wood:'Древесина',weave:'Рогожка',leather:'Кожа'};
-const author=()=>doc.mode==='author';
-function notify(message,error=false){clearTimeout(noticeTimer);$('notice').textContent=message;$('notice').style.background=error?'#813b32':'#233b30';$('notice').hidden=false;noticeTimer=setTimeout(()=>$('notice').hidden=true,error?8500:4200)}
-function storageKey(){return'Lazy3D-v1-'+doc.mode+'-'+doc.meta.id}
-function saveLocal(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>{try{localStorage.setItem(storageKey(),JSON.stringify(doc));$('saveState').textContent='Сохранено в этом браузере'}catch{$('saveState').textContent='Сохраните JSON: автосохранение недоступно'}},300)}
-function commit(next,selection=selected){assertProject(next);past.push(clone(doc));if(past.length>40)past.shift();future=[];doc=next;selected=selection;frameDirty=true;render();saveLocal()}
-function act(action,selection=selected){try{commit(applyAction(doc,action),selection);return true}catch(e){notify(e.message,true);return false}}
-function undo(redo=false){const from=redo?future:past,to=redo?past:future;if(!from.length)return;to.push(clone(doc));doc=from.pop();selected=null;frameDirty=true;render();saveLocal()}
-function select(sel){selected=sel;renderPlan();renderLibrary();renderProperties();if(innerWidth<1050&&sel)$('inspector').classList.add('open')}
-function setTool(next,asset=null){if(!author()&&!['select','place'].includes(next))return;tool=next;pendingAsset=asset;draft=[];setView('plan');document.querySelectorAll('[data-tool]').forEach(b=>b.classList.toggle('selected',b.dataset.tool===tool));const hints={select:'Выберите предмет или добавьте его из библиотеки',wall:'Укажите начало и конец стены · Escape — отменить',room:'Укажите вершины комнаты · Enter — завершить · Escape — отменить',rect:'Укажите противоположные углы комнаты',door:'Нажмите на стену, чтобы добавить дверь',window:'Нажмите на стену, чтобы добавить окно',socket:'Нажмите на стену для розетки',switch:'Нажмите на стену для выключателя',panel:'Нажмите на план для светильника',place:'Нажмите на план: '+(asset?catalogItem(doc,asset).name:'мебель')};$('toolHint').textContent=hints[tool]||'';renderDraft();renderLibrary();$('library').classList.remove('open')}
-function setView(next){view=next;document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('plan').toggleAttribute('hidden',view!=='plan');$('tourFrame').hidden=view!=='3d';document.querySelector('.zoom-controls').hidden=view!=='plan';$('toolHint').parentElement.hidden=view!=='plan';if(view==='3d')render3D()}
-function fitPlan(){const b=bounds(doc),r=$('canvasWrap').getBoundingClientRect(),aspect=r.width/Math.max(r.height,100),pad=80,w=Math.max(200,b[2]-b[0]+pad*2),h=Math.max(200,b[3]-b[1]+pad*2);const W=Math.max(w,h*aspect),H=W/aspect;viewBox=[(b[0]+b[2]-W)/2,(b[1]+b[3]-H)/2,W,H];baseWidth=W;applyViewBox()}
-function applyViewBox(){$('plan').setAttribute('viewBox',viewBox.join(' '));$('zoomValue').textContent=Math.round(baseWidth/viewBox[2]*100)+'%'}
-function zoom(factor,at){const old=viewBox.slice(),w=Math.max(150,Math.min(20000,old[2]*factor)),ratio=w/old[2],p=at||[old[0]+old[2]/2,old[1]+old[3]/2];viewBox=[p[0]-(p[0]-old[0])*ratio,p[1]-(p[1]-old[1])*ratio,w,old[3]*ratio];applyViewBox()}
-function planPoint(e,snap=true){const svg=$('plan'),p=new DOMPoint(e.clientX,e.clientY).matrixTransform(svg.getScreenCTM().inverse()),step=$('snap').checked?5:1;return snap?[Math.round(p.x/step)*step,Math.round(p.y/step)*step]:[p.x,p.y]}
-const points=ps=>ps.map(p=>p.join(',')).join(' ');
-function swatchStyle(m){let bg=m.color;if(m.kind==='fluted')bg=`repeating-linear-gradient(90deg,${m.color} 0 5px,#0002 6px 8px,${m.color} 9px 12px)`;if(m.kind==='weave')bg=`repeating-linear-gradient(0deg,#ffffff18 0 1px,transparent 1px 3px),repeating-linear-gradient(90deg,transparent 0 2px,#0002 2px 3px),${m.color}`;if(m.kind==='brick')bg=`repeating-linear-gradient(0deg,transparent 0 11px,#c9b6a3 11px 13px),repeating-linear-gradient(90deg,transparent 0 22px,#c9b6a3 22px 24px),${m.color}`;if(m.kind==='wood')bg=`repeating-linear-gradient(92deg,transparent 0 5px,#0000000a 6px 8px,transparent 9px 18px),${m.color}`;return bg}
-function itemArt(kind){const paths={desk:'M4 11h34v5H4zM8 16v15M34 16v15M9 25h24',chair:'M13 5h17v12H13zM10 19h23v5H10zM21 24v8M10 32h23M12 16v6M32 16v6',sofa:'M8 8h27v13H8zM4 17h5v13H4zM34 17h5v13h-5zM9 22h25v8H9zM10 30v4M33 30v4',cabinet:'M8 4h27v28H8zM21 4v28M18 15v5M25 15v5M10 32v3M33 32v3',table:'M3 9h37v5H3zM8 14v20M35 14v20',roundTable:'M7 12c0-10 29-10 29 0S7 22 7 12M21 18v15M11 33h20',plant:'M13 25h16l-3 12H16zM21 25V9M21 19c-12 0-15-10-12-12 11 0 14 8 12 12M21 15c0-10 10-15 14-11 0 10-8 14-14 11',glb:'m21 2 16 8v19l-16 8-16-8V10zM5 10l16 8 16-8M21 18v19'};return`<svg viewBox="0 0 44 40" aria-hidden="true"><path d="${paths[kind]||paths.glb}"/></svg>`}
-function renderLibrary(){const filter=$('search').value.toLowerCase(),content=$('libraryContent');
- if(tab==='catalog'){content.innerHTML=doc.catalogs.map(c=>{const rows=c.items.filter(i=>i.name.toLowerCase().includes(filter));if(!rows.length)return'';return`<div class="catalog-heading">${esc(c.name)}<small>${rows.length}</small></div>`+rows.map(i=>`<div class="catalog-row"><button class="catalog-item ${pendingAsset===i.id?'selected':''}" data-place="${i.id}"><span class="catalog-art">${itemArt(i.kind)}</span><span><span class="catalog-name">${esc(i.name)}</span><span class="catalog-size">${i.size.map(n=>Math.round(n)).join(' × ')} см</span></span></button>${author()?`<label class="include-label" title="Включить в выгрузку"><input type="checkbox" data-include="${i.id}" aria-label="Включить ${esc(i.name)} в тур" ${doc.selection.items.includes(i.id)?'checked':''}></label>`:''}</div>`).join('')}).join('')||'<p class="empty">По этому запросу ничего не найдено.</p>';
-  content.querySelectorAll('[data-place]').forEach(b=>b.onclick=()=>{if(!author()&&!doc.policy.furniture){notify('В этом туре изменение расстановки отключено');return}setTool('place',b.dataset.place);selected={kind:'catalog',id:b.dataset.place};renderProperties()});
-  content.querySelectorAll('[data-include]').forEach(b=>b.onchange=()=>{if(!act({type:'selection.item',id:b.dataset.include,selected:b.checked}))b.checked=!b.checked});
- }else if(tab==='materials'){content.innerHTML=doc.materials.filter(m=>m.name.toLowerCase().includes(filter)).map(m=>`<button class="material-row ${selected?.kind==='material'&&selected.id===m.id?'selected':''}" data-material="${m.id}"><span class="swatch" style="background:${swatchStyle(m)}"></span><span><span class="catalog-name">${esc(m.name)}</span><span class="catalog-size">${materialNames[m.kind]} · ${m.scaleCm} см</span></span></button>`).join('');content.querySelectorAll('[data-material]').forEach(b=>b.onclick=()=>{if(selected&&['wall','room'].includes(selected.kind)){act({type:'surface.set',target:selected.kind,id:selected.id,material:b.dataset.material});notify('Отделка применена к выбранной поверхности')}else select({kind:'material',id:b.dataset.material})})
- }else{const groups=[['Помещения',doc.rooms,'room'],['Стены',doc.walls,'wall'],['Мебель',doc.instances,'instance'],['Оборудование',doc.fixtures,'fixture']];content.innerHTML=groups.map(([name,items,kind])=>`<div class="catalog-heading">${name}<small>${items.length}</small></div>`+items.map((it,i)=>{const label=it.name||(kind==='instance'?catalogItem(doc,it.assetId).name:kind==='fixture'?kindNames[it.kind]:'Стена '+(i+1));return label.toLowerCase().includes(filter)?`<button class="scene-row ${selected?.kind===kind&&selected.id===it.id?'selected':''}" data-select-kind="${kind}" data-select-id="${it.id}">${esc(label)}</button>`:''}).join('')).join('');content.querySelectorAll('[data-select-kind]').forEach(b=>b.onclick=()=>select({kind:b.dataset.selectKind,id:b.dataset.selectId}))}
+const $ = (id) => document.getElementById(id),
+  esc = htmlText;
+let doc,
+  bundle,
+  appSources,
+  initial,
+  selected = null,
+  tool = 'select',
+  tab = 'catalog',
+  view = 'plan',
+  pendingAsset = null,
+  draft = [],
+  pointer = null,
+  drag = null,
+  spaceDown = false;
+let past = [],
+  future = [],
+  viewBox = [-100, -100, 800, 650],
+  baseWidth = 800,
+  frameURL = null,
+  frameDirty = true,
+  frameToken = 0,
+  noticeTimer,
+  saveTimer;
+const kindNames = {
+  desk: 'Стол',
+  chair: 'Кресло',
+  sofa: 'Диван',
+  cabinet: 'Шкаф',
+  table: 'Стол',
+  roundTable: 'Столик',
+  plant: 'Растение',
+  glb: 'Модель',
+  socket: 'Розетка',
+  switch: 'Выключатель',
+  panel: 'Панель',
+  spot: 'Точечный свет',
+};
+const materialNames = {
+  paint: 'Краска',
+  plaster: 'Штукатурка',
+  brick: 'Кирпич',
+  fluted: 'Рейки',
+  wood: 'Древесина',
+  weave: 'Рогожка',
+  leather: 'Кожа',
+};
+const author = () => doc.mode === 'author';
+function notify(message, error = false) {
+  clearTimeout(noticeTimer);
+  $('notice').textContent = message;
+  $('notice').style.background = error ? '#813b32' : '#233b30';
+  $('notice').hidden = false;
+  noticeTimer = setTimeout(() => ($('notice').hidden = true), error ? 8500 : 4200);
 }
-function renderPlan(){if(!doc)return;const b=bounds(doc),sel=selected;let s=`<rect x="-100000" y="-100000" width="200000" height="200000" fill="url(#gridLarge)"/>`;
- for(const r of doc.rooms){const m=doc.materials.find(m=>m.id===r.material),xs=r.polygon.map(p=>p[0]),ys=r.polygon.map(p=>p[1]),cx=(Math.min(...xs)+Math.max(...xs))/2,cy=(Math.min(...ys)+Math.max(...ys))/2;const picked=sel?.kind==='room'&&sel.id===r.id;s+=`<polygon points="${points(r.polygon)}" fill="${m.color}" fill-opacity=".18" stroke="${picked?'#168469':'#d5ded3'}" stroke-width="${picked?3:1}" data-kind="room" data-id="${r.id}"/><text x="${cx}" y="${cy+40}" class="room-label">${esc(r.name)}</text><text x="${cx}" y="${cy+57}" class="dimension">${(polygonArea(r.polygon)/10000).toFixed(1)} м²</text>`}
- for(const w of doc.walls){const chosen=sel?.kind==='wall'&&sel.id===w.id,L=wallLength(w);s+=`<line x1="${w.a[0]}" y1="${w.a[1]}" x2="${w.b[0]}" y2="${w.b[1]}" stroke="${chosen?'#176d5b':'#42544a'}" stroke-width="${w.thickness}" stroke-linecap="square" data-kind="wall" data-id="${w.id}"/>`;s+=`<line class="hit-wall" x1="${w.a[0]}" y1="${w.a[1]}" x2="${w.b[0]}" y2="${w.b[1]}" data-kind="wall" data-id="${w.id}"/>`;
-  const mid=wallPoint(w,L/2,-w.thickness/2-14);s+=`<text x="${mid[0]}" y="${mid[1]}" class="dimension">${Math.round(L)} см</text>`;
-  for(const o of w.openings){const a=wallPoint(w,o.offset),bb=wallPoint(w,o.offset+o.width),theta=Math.atan2(w.b[1]-w.a[1],w.b[0]-w.a[0]),picked=sel?.kind==='opening'&&sel.id===o.id;let detail='';if(o.type==='door'){const hinge=o.hinge==='e'?bb:a,sign=(o.hinge==='e'?-1:1),side=o.swing||1,start=o.hinge==='e'?a:bb,end=[hinge[0]-Math.sin(theta)*side*o.width,hinge[1]+Math.cos(theta)*side*o.width];detail=`<path d="M${start} A${o.width},${o.width} 0 0 ${side*sign>0?1:0} ${end}" fill="none" stroke="#9fae9d" stroke-width="1.2"/><line x1="${hinge[0]}" y1="${hinge[1]}" x2="${end[0]}" y2="${end[1]}" stroke="#91a28e" stroke-width="2"/>`}
-   s+=`<g data-kind="opening" data-id="${o.id}" data-wall="${w.id}" style="cursor:pointer"><line x1="${a[0]}" y1="${a[1]}" x2="${bb[0]}" y2="${bb[1]}" stroke="#f0f3e9" stroke-width="${w.thickness+1}"/>${o.type==='window'?`<line x1="${a[0]}" y1="${a[1]}" x2="${bb[0]}" y2="${bb[1]}" stroke="#67a6bb" stroke-width="${picked?6:4}"/><line x1="${a[0]}" y1="${a[1]}" x2="${bb[0]}" y2="${bb[1]}" stroke="#d9eff0" stroke-width="1"/>`:detail}<line x1="${a[0]}" y1="${a[1]}" x2="${bb[0]}" y2="${bb[1]}" stroke="${picked?'#16846966':'transparent'}" stroke-width="${w.thickness+4}"/></g>`;
+function storageKey() {
+  return author() ? 'Lazy3D-v1-author-last' : 'Lazy3D-v1-recipient-' + doc.meta.id;
+}
+function saveLocal() {
+  clearTimeout(saveTimer);
+  $('saveState').textContent = 'Сохраняем…';
+  saveTimer = setTimeout(persistLocal, 300);
+}
+function persistLocal() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  if (!doc) return;
+  try {
+    localStorage.setItem(storageKey(), JSON.stringify(doc));
+    $('saveState').textContent = 'Сохранено в этом браузере';
+  } catch {
+    $('saveState').textContent = 'Сохраните JSON: автосохранение недоступно';
   }
-  if(chosen&&author())for(const [end,pt]of [['a',w.a],['b',w.b]])s+=`<circle cx="${pt[0]}" cy="${pt[1]}" r="6" fill="white" stroke="#176d5b" stroke-width="2" data-kind="wall-end" data-id="${w.id}" data-end="${end}"/>`;
- }
- for(const it of doc.instances){const a=catalogItem(doc,it.assetId),m=doc.materials.find(m=>m.id===a.material),chosen=sel?.kind==='instance'&&sel.id===it.id,[w,d]=a.size;let inside='';if(['desk','table'].includes(a.kind))inside=`<path d="M${-w/2+8} ${-d/2+8}v${d-16}M${w/2-8} ${-d/2+8}v${d-16}" stroke="#ffffff95" stroke-width="2"/>`;if(a.kind==='chair')inside=`<path d="M${-w*.38} ${d*.25}h${w*.76}M0 ${-d*.25}v${d*.55}" stroke="#fff9" stroke-width="3"/>`;if(a.kind==='sofa')inside=`<path d="M${-w/2+12} ${-d/2+15}h${w-24}v${d-30}M0 ${-d/2+15}v${d-25}" stroke="#fff9" fill="none" stroke-width="3"/>`;
-  s+=`<g class="item" transform="translate(${it.x} ${it.y}) rotate(${it.rotation})" data-kind="instance" data-id="${it.id}"><title>${esc(a.name)}</title><rect x="${-w/2}" y="${-d/2}" width="${w}" height="${d}" rx="${a.kind==='roundTable'||a.kind==='plant'?Math.min(w,d)/2:3}" fill="${m.color}" fill-opacity=".7" stroke="${chosen?'#087e63':'#63796a'}" stroke-width="${chosen?3:1}"/>${inside}<line x1="0" y1="${-d/2}" x2="0" y2="${-d/2-9}" stroke="${chosen?'#087e63':'#63796a'}" stroke-width="2"/>${chosen?`<circle cx="0" cy="${-d/2-11}" r="4" fill="#168469"/>`:''}</g>`;
- }
- for(const f of doc.fixtures){const pt=fixturePosition(doc,f),chosen=sel?.kind==='fixture'&&sel.id===f.id;const color=chosen?'#077b60':['panel','spot'].includes(f.kind)?'#c58d2e':'#587383';let mark=f.kind==='panel'?`<rect x="${-(f.width||60)/2}" y="${-(f.depth||40)/2}" width="${f.width||60}" height="${f.depth||40}" fill="#f4e3b183" stroke="${color}" stroke-width="${chosen?2.5:1.2}" stroke-dasharray="4 3"/>`:`<circle r="${f.kind==='spot'?9:6}" fill="white" stroke="${color}" stroke-width="2"/><path d="M-3 0h6M0-3v6" stroke="${color}"/>`;s+=`<g transform="translate(${pt})" data-kind="fixture" data-id="${f.id}" style="cursor:pointer">${mark}<title>${kindNames[f.kind]} · ${f.height} см</title></g>`}
- const x0=b[0],x1=b[2],yy=b[3]+39;s+=`<path d="M${x0} ${yy-6}v12M${x0} ${yy}H${x1}M${x1} ${yy-6}v12" stroke="#789080" stroke-width=".8"/><text x="${(x0+x1)/2}" y="${yy-6}" class="dimension">${Math.round(x1-x0)*10} мм</text>`;
- $('planContent').innerHTML=s;applyViewBox();renderDraft();
 }
-function renderDraft(){let s='';if(draft.length){const pts=pointer?[...draft,pointer]:draft;s=`<polyline points="${points(pts)}" fill="${tool==='room'?'#4e96771a':'none'}" stroke="#187c60" stroke-width="3" stroke-dasharray="7 4"/>`+draft.map(pt=>`<circle cx="${pt[0]}" cy="${pt[1]}" r="4" fill="#187c60"/>`).join('');if(tool==='rect'&&pointer){const a=draft[0],b=pointer;s=`<rect x="${Math.min(a[0],b[0])}" y="${Math.min(a[1],b[1])}" width="${Math.abs(a[0]-b[0])}" height="${Math.abs(a[1]-b[1])}" fill="#4e96771a" stroke="#187c60" stroke-width="2"/>`}}if(tool==='place'&&pointer&&pendingAsset){const a=catalogItem(doc,pendingAsset);s=`<rect x="${pointer[0]-a.size[0]/2}" y="${pointer[1]-a.size[1]/2}" width="${a.size[0]}" height="${a.size[1]}" fill="#4e967733" stroke="#187c60" stroke-width="2" stroke-dasharray="5 3"/>`}$('draftContent').innerHTML=s}
-const field=(label,key,value,type='number',extra='')=>`<label class="field">${label}<input data-edit="${key}" type="${type}" value="${esc(value??'')}" ${extra}></label>`;
-const choose=(label,key,value,options)=>`<label class="field">${label}<select data-edit="${key}">${options.map(([v,n])=>`<option value="${esc(v)}" ${String(value)===String(v)?'selected':''}>${esc(n)}</option>`).join('')}</select></label>`;
-const section=(name,body)=>`<section class="property-section"><h3>${name}</h3>${body}</section>`;
-const grid=html=>`<div class="property-grid">${html}</div>`;
-const materialSelect=(value,key='material')=>choose('Материал',key,value,doc.materials.map(m=>[m.id,m.name]));
-const deletion=label=>`<button data-command="delete" class="danger">Удалить ${label}</button>`;
-function findSelected(){if(!selected)return null;const map={wall:doc.walls,room:doc.rooms,instance:doc.instances,fixture:doc.fixtures,material:doc.materials,catalog:catalogItems(doc)};if(selected.kind==='opening')return doc.walls.find(w=>w.id===selected.wallId)?.openings.find(o=>o.id===selected.id);return map[selected.kind]?.find(x=>x.id===selected.id)}
-function projectProperties(){const summary=packageSummary(doc),checks=planIssues(doc);return section('Состав пространства',`<div class="package-counts"><span>Помещения</span><b>${doc.rooms.length}</b><span>Площадь контуров</span><b>${(doc.rooms.reduce((s,r)=>s+polygonArea(r.polygon),0)/10000).toFixed(1)} м²</b><span>Мебель на плане</span><b>${doc.instances.length}</b></div>${author()?'<button class="outline" data-command="rectangle">Добавить комнату прямоугольником</button>':''}`)+section('Освещение',choose('Режим','light.preset',doc.lighting.preset,[['day','Дневной'],['work','Рабочий'],['sunset','Закат'],['evening','Вечер']])+grid(field('Дневной свет, K','light.naturalTemperature',doc.lighting.naturalTemperature,'number','min="2000" max="10000" step="100"')+field('Интенсивность','light.naturalPower',doc.lighting.naturalPower,'number','min="0" max="3" step="0.1"'))+field('Экспозиция','light.exposure',doc.lighting.exposure,'number','min="0.3" max="2" step="0.1"'))+section('Пакет для получателя',`<div class="package-counts"><span>Изделий в каталоге</span><b>${summary.items}</b><span>Материалов</span><b>${summary.materials}</b><span>Вложенных файлов</span><b>${summary.files}</b></div>${author()?`<label class="checkbox-field"><input data-policy="furniture" type="checkbox" ${doc.policy.furniture?'checked':''}>Разрешить расстановку мебели</label><label class="checkbox-field"><input data-policy="finishes" type="checkbox" ${doc.policy.finishes?'checked':''}>Разрешить смену отделки</label>`:''}<p>Встроены выбранные изделия и необходимые им материалы. Открывается одним HTML без интернета.</p>`)+section('Проверка плана',checks.length?`<ul class="issues-list">${checks.slice(0,6).map(s=>`<li>${esc(s)}</li>`).join('')}</ul><p>Проверка приблизительная, по габаритам.</p>`:'<p>По базовой проверке предметов за границами комнат и пересечений со сплошными стенами не найдено.</p>')+(author()?section('Файлы',`<button class="outline" data-command="new">Новый проект 6 × 4,5 м</button><p>Текущую работу можно вернуть отменой действия.</p>`):'')}
-function renderProperties(){const item=findSelected(),kind=selected?.kind;$('inspectorTitle').textContent='Проект';let s='';if(!item){selected=null;s=projectProperties()}else if(kind==='wall'){$('inspectorTitle').textContent='Стена';s=section('Размеры',grid(field('Начало X, см','ax',item.a[0])+field('Начало Y, см','ay',item.a[1])+field('Конец X, см','bx',item.b[0])+field('Конец Y, см','by',item.b[1])+field('Толщина, см','thickness',item.thickness)+field('Высота, см','height',item.height)))+section('Поверхность',materialSelect(item.material));if(author())s+=section('Проёмы',`<button class="outline" data-command="door">Добавить дверь</button><button class="outline" data-command="window" style="margin-top:8px">Добавить окно</button>`)+deletion('стену')}
- else if(kind==='room'){$('inspectorTitle').textContent=item.name;s=section('Помещение',field('Название','name',item.name,'text')+`<p>${(polygonArea(item.polygon)/10000).toFixed(2)} м² · ${item.polygon.length} вершин</p>`)+section('Пол',materialSelect(item.material));if(author())s+=section('Точный контур',item.polygon.map((p,i)=>grid(field(`X${i+1}, см`,'point.'+i+'.0',p[0])+field(`Y${i+1}, см`,'point.'+i+'.1',p[1]))).join(''))+deletion('контур комнаты')}
- else if(kind==='opening'){$('inspectorTitle').textContent=item.type==='window'?'Окно':'Дверной проём';s=section('Положение и габариты',field('От начала стены, см','offset',item.offset)+grid(field('Ширина, см','width',item.width)+field('Высота, см','height',item.height))+(item.type==='window'?field('Подоконник от пола, см','sill',item.sill):choose('Петли','hinge',item.hinge||'s',[['s','У начала проёма'],['e','У конца проёма']])+choose('Сторона открывания','swing',item.swing||1,[[1,'Сторона 1'],[-1,'Сторона 2']])));if(author())s+=deletion('проём')}
- else if(kind==='instance'){const a=catalogItem(doc,item.assetId);$('inspectorTitle').textContent=a.name;s=section('Положение',grid(field('X, см','x',item.x)+field('Y, см','y',item.y)+field('От пола, см','z',item.z)+field('Поворот, °','rotation',item.rotation))+`<button class="outline" data-command="rotate">Повернуть на 90°</button>`)+section('Изделие',`<p>${a.size.join(' × ')} см</p><p>${esc(doc.materials.find(m=>m.id===a.material).name)}</p>${author()?'<button class="outline" data-command="definition">Настроить изделие</button>':''}`)+deletion('предмет')}
- else if(kind==='fixture'){$('inspectorTitle').textContent=kindNames[item.kind];s=section('Размещение',(item.wallId?field('От начала стены, см','offset',item.offset)+choose('Сторона стены','side',item.side,[[1,'Сторона 1'],[-1,'Сторона 2']]):grid(field('X, см','x',item.x)+field('Y, см','y',item.y)))+field('Высота от пола, см','height',item.height));if(['panel','spot'].includes(item.kind))s+=section('Свет',grid(field('Температура, K','temperature',item.temperature,'number','min="2000" max="10000" step="100"')+field('Мощность источника','power',item.power,'number','min="0" max="100" step="0.5"'))+(item.kind==='panel'?grid(field('Ширина, см','width',item.width)+field('Глубина, см','depth',item.depth)):'')+'<p>Мощность — параметр визуализации, не расчёт освещённости.</p>');if(author())s+=deletion('оборудование')}
- else if(kind==='catalog'){$('inspectorTitle').textContent=item.name;s=section('Изделие каталога',field('Название','name',item.name,'text')+grid(field('Ширина, см','size.0',item.size[0])+field('Глубина, см','size.1',item.size[1])+field('Высота, см','size.2',item.size[2]))+materialSelect(item.material)+(item.kind==='glb'?'<p>Размер прочитан из GLB. Геометрия сохраняет исходные пропорции.</p>':'<p>Изменение размеров обновит все экземпляры этого изделия.</p>'))+section('Размещение','<button class="primary" data-command="placeSelected">Добавить на план</button>')}
- else if(kind==='material'){$('inspectorTitle').textContent=item.name;s=`<div class="material-preview" style="background:${swatchStyle(item)}"></div>`+section(materialNames[item.kind],field('Название','name',item.name,'text')+field('Цвет','color',item.color,'color')+field('Шероховатость','roughness',item.roughness,'number','min="0.04" max="1" step="0.01"')+grid(field('Тайл, см','scaleCm',item.scaleCm,'number','min="0.5" step="0.1"')+field('Рельеф, мм','reliefMm',item.reliefMm,'number','min="0" max="30" step="0.1"')))+(author()?section('Свои карты',`<button class="outline" data-map="texture">Цветовая карта</button><button class="outline" data-map="normal" style="margin-top:8px">Normal · OpenGL Y+</button><button class="outline" data-map="roughnessMap" style="margin-top:8px">Карта шероховатости</button><p>PNG, JPEG или WebP. Карты и физический масштаб сохраняются в проекте.</p><label class="checkbox-field"><input type="checkbox" data-material-include="${item.id}" ${doc.selection.materials.includes(item.id)?'checked':''}>Предлагать эту отделку получателю</label>`):'')}
- $('properties').innerHTML=s;
- if(!author())$('properties').querySelectorAll('[data-edit]').forEach(el=>{const key=el.dataset.edit,allowed=(kind==='instance'&&doc.policy.furniture)||(key.startsWith('light.'))||(['wall','room'].includes(kind)&&key==='material'&&doc.policy.finishes);el.disabled=!allowed});
- if(kind==='catalog'&&item?.kind==='glb')$('properties').querySelectorAll('[data-edit^="size."]').forEach(el=>el.disabled=true);
- $('properties').querySelectorAll('[data-edit]').forEach(el=>el.onchange=()=>changeProperty(el));$('properties').querySelectorAll('[data-command]').forEach(b=>b.onclick=()=>command(b.dataset.command));
- $('properties').querySelectorAll('[data-policy]').forEach(el=>el.onchange=()=>act({type:'policy.update',patch:{[el.dataset.policy]:el.checked}}));
- $('properties').querySelectorAll('[data-map]').forEach(b=>b.onclick=()=>{$('textureFile').dataset.map=b.dataset.map;$('textureFile').dataset.material=item.id;$('textureFile').click()});
- $('properties').querySelectorAll('[data-material-include]').forEach(el=>el.onchange=()=>act({type:'selection.material',id:el.dataset.materialInclude,selected:el.checked}));
+function commit(next, selection = selected) {
+  assertProject(next);
+  past.push(clone(doc));
+  if (past.length > 40) past.shift();
+  future = [];
+  doc = next;
+  selected = selection;
+  frameDirty = true;
+  render();
+  saveLocal();
 }
-function changeProperty(el){const key=el.dataset.edit,item=findSelected();let value=el.type==='number'?el.valueAsNumber:el.value;if(['swing','side'].includes(key))value=Number(value);if(key.startsWith('light.')){act({type:'lighting.update',patch:{[key.slice(6)]:value}});return}if(!item)return;let patch={[key]:value};if(['ax','ay','bx','by'].includes(key)){const k=key[0];patch={[k]:item[k].slice()};patch[k][key[1]==='x'?0:1]=value}if(key.startsWith('point.')){const[,i,j]=key.split('.');patch={polygon:clone(item.polygon)};patch.polygon[i][j]=value}if(key.startsWith('size.')){patch={size:item.size.slice()};patch.size[Number(key.slice(5))]=value}let action={type:selected.kind+'.update',id:item.id,patch};if(selected.kind==='opening')action.wallId=selected.wallId;if(!author()&&key==='material')action={type:'surface.set',target:selected.kind,id:item.id,material:value};if(!act(action))renderProperties()}
-function command(cmd){if(cmd==='rectangle'){setTool('rect');return}if(cmd==='new'){const p=clone(initial);p.meta.id=newId('project');p.meta.name='Новый проект';p.instances=[];p.fixtures=[];commit(p,null);fitPlan();return}if(!selected)return;const item=findSelected();if(cmd==='definition'){select({kind:'catalog',id:item.assetId});return}if(cmd==='placeSelected'){setTool('place',item.id);return}if(cmd==='rotate'){act({type:'instance.update',id:item.id,patch:{rotation:(item.rotation+90)%360}});return}if(cmd==='delete'){const a={type:selected.kind+'.delete',id:selected.id,wallId:selected.wallId};act(a,null);return}if(['door','window'].includes(cmd)&&selected.kind==='wall')addOpening(item,wallLength(item)/2,cmd)}
-function addOpening(w,at,type){const width=type==='door'?90:120,H=Math.min(type==='door'?210:150,w.height),sill=type==='window'?Math.min(85,w.height-H):0;const opening={id:newId(type),type,offset:Math.round(Math.max(0,Math.min(wallLength(w)-width,at-width/2))),width,sill,height:H,hinge:'s',swing:1};act({type:'opening.add',wallId:w.id,opening},{kind:'opening',id:opening.id,wallId:w.id})}
-function finishRoom(poly=draft){if(poly.length<3){notify('Укажите минимум три вершины комнаты');return}const next=clone(doc),id=newId('room'),floor=doc.rooms[0].material,mat=doc.walls[0].material;{const height=doc.walls[0].height;next.rooms.push({id,name:'Комната '+(doc.rooms.length+1),polygon:clone(poly),material:floor});for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],same=next.walls.some(w=>(JSON.stringify(w.a)===JSON.stringify(a)&&JSON.stringify(w.b)===JSON.stringify(b))||(JSON.stringify(w.a)===JSON.stringify(b)&&JSON.stringify(w.b)===JSON.stringify(a)));if(!same)next.walls.push({id:newId('wall'),a:a.slice(),b:b.slice(),thickness:20,height,material:mat,openings:[]})}}try{commit(next,{kind:'room',id});setTool('select');fitPlan()}catch(e){notify(e.message,true)}}
-function placeAt(pt,target){
- if(tool==='wall'){draft.push(pt);if(draft.length===2){const wall={id:newId('wall'),a:draft[0],b:draft[1],thickness:20,height:doc.walls[0].height,material:doc.walls[0].material,openings:[]};if(act({type:'wall.add',wall},{kind:'wall',id:wall.id}))draft=[pt];else draft=[]}renderDraft();return}
- if(tool==='room'){if(draft.length>=3&&Math.hypot(pt[0]-draft[0][0],pt[1]-draft[0][1])<12)finishRoom();else{draft.push(pt);renderDraft()}return}
- if(tool==='rect'){draft.push(pt);if(draft.length===2){const[a,b]=draft;finishRoom([[Math.min(a[0],b[0]),Math.min(a[1],b[1])],[Math.max(a[0],b[0]),Math.min(a[1],b[1])],[Math.max(a[0],b[0]),Math.max(a[1],b[1])],[Math.min(a[0],b[0]),Math.max(a[1],b[1])]])}return}
- if(tool==='place'&&pendingAsset){try{const next=applyAction(doc,{type:'instance.add',assetId:pendingAsset,x:pt[0],y:pt[1]});commit(next,{kind:'instance',id:next.instances.at(-1).id});setTool('select');if(innerWidth<1050)$('inspector').classList.add('open')}catch(e){notify(e.message,true)}return}
- if(['door','window','socket','switch'].includes(tool)){const near=doc.walls.map(w=>({w,...projectOnWall(w,pt)})).sort((a,b)=>a.distance-b.distance)[0];if(!near||near.distance>30){notify('Нажмите ближе к стене');return}if(['door','window'].includes(tool))addOpening(near.w,near.offset,tool);else{const fixture={id:newId(tool),kind:tool,wallId:near.w.id,offset:Math.round(near.offset),side:1,height:tool==='socket'?30:95};act({type:'fixture.add',fixture},{kind:'fixture',id:fixture.id})}setTool('select');return}
- if(tool==='panel'){const fixture={id:newId('lamp'),kind:'panel',x:pt[0],y:pt[1],height:doc.walls[0].height-10,width:60,depth:60,temperature:4000,power:12};act({type:'fixture.add',fixture},{kind:'fixture',id:fixture.id});setTool('select');return}
- const t=target?.closest?.('[data-kind]');select(t?{kind:t.dataset.kind,id:t.dataset.id,wallId:t.dataset.wall}:null);
+function act(action, selection = selected) {
+  try {
+    commit(applyAction(doc, action), selection);
+    return true;
+  } catch (e) {
+    notify(e.message, true);
+    return false;
+  }
 }
-function render(){document.body.classList.toggle('exported',!author());$('projectName').value=doc.meta.name;$('undo').disabled=!past.length;$('redo').disabled=!future.length;$('areaSummary').textContent=doc.rooms.length+' пом. · '+(doc.rooms.reduce((s,r)=>s+polygonArea(r.polygon),0)/10000).toFixed(1)+' м²';const sum=packageSummary(doc);$('packageSummary').textContent='В туре: '+sum.items+' изделий · '+sum.materials+' материалов';renderLibrary();renderPlan();renderProperties();if(view==='3d')render3D()}
-function render3D(){if(!frameDirty)return;frameDirty=false;const token=++frameToken;$('viewLoading').hidden=false;$('viewLoading').textContent='Готовим 3D…';let snapshot;try{snapshot=$('tourFrame').contentWindow.TOUR?.snapshot()}catch{}
- try{const html=createTourHTML(doc,bundle),url=URL.createObjectURL(new Blob([html],{type:'text/html'}));if(frameURL)URL.revokeObjectURL(frameURL);frameURL=url;$('tourFrame').src=url;$('tourFrame').onload=()=>{if(token!==frameToken)return;try{if(snapshot)$('tourFrame').contentWindow.TOUR?.restore(snapshot)}catch{}}}catch(e){$('viewLoading').textContent=e.message;notify(e.message,true)}
+function undo(redo = false) {
+  const from = redo ? future : past,
+    to = redo ? past : future;
+  if (!from.length) return;
+  to.push(clone(doc));
+  doc = from.pop();
+  selected = null;
+  frameDirty = true;
+  render();
+  saveLocal();
 }
-function download(name,content,type){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([content],{type}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000)}
-function exportTour(){try{const html=createOfflineHTML(doc,bundle,appSources);download(doc.meta.id+'-tour.html',html,'text/html');notify('Автономный тур выгружен. В нём '+packageSummary(doc).items+' изделий')}catch(e){notify(e.message,true)}}
-function saveProject(){download(doc.meta.id+(author()?'-project':'-variant')+'.json',JSON.stringify(doc,null,2),'application/json');notify('Файл проекта сохранён')}
-async function fileJSON(file){if(file.size>72*1024*1024)throw new Error('JSON превышает 72 МБ');return JSON.parse(await file.text())}
-const base64FromBuffer=buffer=>{const bytes=new Uint8Array(buffer);let s='';for(let i=0;i<bytes.length;i+=32768)s+=String.fromCharCode(...bytes.subarray(i,i+32768));return btoa(s)};
-async function importModel(file){if(!author())throw new Error('Импорт доступен автору');const data=base64FromBuffer(await file.arrayBuffer()),info=inspectGLB(data),p=clone(doc),id=newId('model'),asset=newId('glb');let cat=p.catalogs.find(c=>c.id==='imported');if(!cat){cat={id:'imported',name:'Мои модели',items:[]};p.catalogs.push(cat)}cat.items.push({id,name:file.name.replace(/\.glb$/i,'').slice(0,180),kind:'glb',size:info.size,model:asset,material:p.materials[0].id,geometry:{vertices:info.vertices,triangles:info.triangles}});p.assets[asset]={mime:'model/gltf-binary',data};p.selection.items.push(id);commit(p,{kind:'catalog',id});notify('Модель добавлена: '+info.size.join(' × ')+' см');setTool('place',id)}
-async function importCatalog(file){if(!author())throw new Error('Импорт доступен автору');const pack=await fileJSON(file);if(pack.schema!=='lazy-catalog/1'||!pack.catalog||!Array.isArray(pack.materials)||!pack.assets)throw new Error('Нужен каталог lazy-catalog/1 с catalog, materials, assets');const p=clone(doc);if(p.catalogs.some(c=>c.id===pack.catalog.id))throw new Error('Каталог с таким id уже есть');for(const m of pack.materials){const old=p.materials.find(x=>x.id===m.id);if(old&&JSON.stringify(old)!==JSON.stringify(m))throw new Error('Конфликт идентификатора материала '+m.id);if(!old)p.materials.push(m)}for(const [id,a]of Object.entries(pack.assets)){if(p.assets[id]&&JSON.stringify(p.assets[id])!==JSON.stringify(a))throw new Error('Конфликт файла '+id);if(a.mime==='model/gltf-binary')inspectGLB(a.data)}p.assets={...p.assets,...pack.assets};p.catalogs.push(pack.catalog);p.selection.items.push(...pack.catalog.items.map(i=>i.id));commit(p,null);notify('Каталог добавлен')}
-function bind(){
- document.querySelectorAll('[data-tool]').forEach(b=>b.onclick=()=>setTool(b.dataset.tool));document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view));document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;document.querySelectorAll('[data-tab]').forEach(t=>{t.classList.toggle('active',t===b);t.setAttribute('aria-selected',t===b?'true':'false')});renderLibrary()});
- $('search').oninput=renderLibrary;$('projectName').onchange=e=>act({type:'meta.update',patch:{name:e.target.value}});$('undo').onclick=()=>undo();$('redo').onclick=()=>undo(true);$('fitPlan').onclick=fitPlan;$('zoomIn').onclick=()=>zoom(.8);$('zoomOut').onclick=()=>zoom(1.25);$('exportTour').onclick=exportTour;$('mobileExport').onclick=exportTour;$('saveProject').onclick=saveProject;$('openProject').onclick=()=>$('projectFile').click();$('importModel').onclick=()=>$('modelFile').click();$('importCatalog').onclick=()=>$('catalogFile').click();
- $('projectFile').onchange=async e=>{try{if(e.target.files[0]){const p=restoreVariant(doc,await fileJSON(e.target.files[0]));commit(p,null);fitPlan();notify('Проект открыт')}}catch(err){notify(err.message,true)}finally{e.target.value=''}};
- for(const [id,fn]of [['modelFile',importModel],['catalogFile',importCatalog]])$(id).onchange=async e=>{try{if(e.target.files[0])await fn(e.target.files[0])}catch(err){notify(err.message,true)}finally{e.target.value=''}};
- $('textureFile').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>8*1024*1024||!['image/png','image/jpeg','image/webp'].includes(file.type))throw new Error('Нужна карта PNG/JPEG/WebP до 8 МБ');const bitmap=await createImageBitmap(file);if(bitmap.width>8192||bitmap.height>8192){bitmap.close();throw new Error('Максимальная сторона карты — 8192 px')}bitmap.close();const p=clone(doc),key=newId('texture'),m=p.materials.find(m=>m.id===e.target.dataset.material);if(!m)throw new Error('Материал не найден');p.assets[key]={mime:file.type,data:base64FromBuffer(await file.arrayBuffer())};m[e.target.dataset.map]=key;commit(p);notify('Карта добавлена в материал')}catch(err){notify(err.message,true)}finally{e.target.value=''}};
- $('showLibrary').onclick=()=>{$('library').classList.toggle('open');$('inspector').classList.remove('open')};$('showInspector').onclick=()=>{$('inspector').classList.toggle('open');$('library').classList.remove('open')};$('closeLibrary').onclick=()=>$('library').classList.remove('open');$('closeInspector').onclick=()=>$('inspector').classList.remove('open');$('helpButton').onclick=()=>$('helpDialog').showModal();$('closeHelp').onclick=()=>$('helpDialog').close();$('issuesButton').onclick=()=>{select(null);$('inspector').classList.add('open');const issues=planIssues(doc);notify(issues.length?issues.join('\n'):'Базовая проверка плана завершена без замечаний',!!issues.length)};
- const svg=$('plan');svg.addEventListener('wheel',e=>{e.preventDefault();zoom(e.deltaY>0?1.12:.89,planPoint(e,false))},{passive:false});
- svg.addEventListener('pointerdown',e=>{if(e.button===2)return;svg.focus();const pt=planPoint(e),raw=planPoint(e,false),target=e.target.closest?.('[data-kind]');svg.setPointerCapture(e.pointerId);if(e.button===1||spaceDown){drag={type:'pan',at:raw,box:viewBox.slice(),screen:[e.clientX,e.clientY]};return}if(tool==='select'&&target&&['instance','wall-end','fixture'].includes(target.dataset.kind)){const kind=target.dataset.kind,id=target.dataset.id;select({kind:kind==='wall-end'?'wall':kind,id});if((kind==='instance'&&(author()||doc.policy.furniture))||(author()&&kind==='wall-end')||(author()&&kind==='fixture'))drag={type:kind,id,endpoint:target.dataset.end,at:pt,original:clone(doc),moved:false};return}placeAt(pt,e.target)});
- svg.addEventListener('pointermove',e=>{pointer=planPoint(e);$('coordinates').textContent='X '+pointer[0]+' · Y '+pointer[1]+' см';if(drag?.type==='pan'){const r=svg.getBoundingClientRect();viewBox=[drag.box[0]-(e.clientX-drag.screen[0])/r.width*drag.box[2],drag.box[1]-(e.clientY-drag.screen[1])/r.height*drag.box[3],drag.box[2],drag.box[3]];applyViewBox();return}if(drag){const p=clone(drag.original),dx=pointer[0]-drag.at[0],dy=pointer[1]-drag.at[1];if(Math.abs(dx)+Math.abs(dy)<2)return;drag.moved=true;if(drag.type==='instance'){const it=p.instances.find(i=>i.id===drag.id);it.x+=dx;it.y+=dy}if(drag.type==='wall-end')p.walls.find(w=>w.id===drag.id)[drag.endpoint]=pointer.slice();if(drag.type==='fixture'){const f=p.fixtures.find(f=>f.id===drag.id);if(f.wallId)f.offset=Math.round(projectOnWall(p.walls.find(w=>w.id===f.wallId),pointer).offset);else{f.x+=dx;f.y+=dy}}doc=p;renderPlan();return}renderDraft()});
- const release=()=>{if(drag&&drag.type!=='pan'){const candidate=doc,original=drag.original;doc=original;if(drag.moved){try{commit(candidate)}catch(e){notify(e.message,true);render()}}}drag=null};svg.addEventListener('pointerup',release);svg.addEventListener('pointercancel',()=>{if(drag?.original){doc=drag.original;render()}drag=null});
- addEventListener('keydown',e=>{if(/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)||$('helpDialog').open)return;if(e.code==='Space'){spaceDown=true;e.preventDefault()}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();undo(e.shiftKey);return}if(e.key==='Escape'){setTool('select');selected=null;renderProperties();renderPlan()}if(e.key==='Enter'&&tool==='room'){e.preventDefault();finishRoom()}if(e.key==='Delete'||e.key==='Backspace'){if(selected&&!['catalog','material'].includes(selected.kind)){e.preventDefault();command('delete')}}if(selected?.kind==='instance'&&['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();const it=findSelected(),step=$('snap').checked?5:1;act({type:'instance.update',id:it.id,patch:{x:it.x+(e.key==='ArrowRight'?step:e.key==='ArrowLeft'?-step:0),y:it.y+(e.key==='ArrowDown'?step:e.key==='ArrowUp'?-step:0)}})}if(e.key.toLowerCase()==='v')setTool('select');if(e.key.toLowerCase()==='w')setTool('wall')});addEventListener('keyup',e=>{if(e.code==='Space')spaceDown=false});
- addEventListener('message',e=>{if(e.source!==$('tourFrame').contentWindow)return;if(e.data?.type==='lazy-render-ready'){$('viewLoading').hidden=true}else if(e.data?.type==='lazy-render-error'){$('viewLoading').hidden=false;$('viewLoading').textContent='3D недоступен: '+e.data.message}});
- new ResizeObserver(()=>{if(view==='plan')applyViewBox()}).observe($('canvasWrap'));
+function select(sel) {
+  selected = sel;
+  renderPlan();
+  renderLibrary();
+  renderProperties();
+  if (innerWidth < 1050 && sel) $('inspector').classList.add('open');
 }
-async function boot(){try{const seed=window.LAZY_EMBED||await(await fetch('/api/bootstrap')).json();doc=assertProject(seed.project);bundle=seed.bundle;appSources=seed.app;initial=clone(doc);try{const raw=localStorage.getItem(storageKey());if(raw)doc=restoreVariant(doc,JSON.parse(raw))}catch{/* Keep the validated source when a local cache is incompatible. */}bind();render();fitPlan();if(!author())setView('3d');$('saveState').textContent=author()?'Проект открыт · сантиметры':'Автономный тур · выбранный каталог';window.LAZY={getProject:()=>clone(doc),dispatch:act,select,setView,exportHTML:()=>createOfflineHTML(doc,bundle,appSources),validate:()=>validateProject(doc),setTool};}catch(e){$('saveState').textContent='Не удалось открыть проект';notify(e.message,true)}}
+function setTool(next, asset = null) {
+  if (!author() && !['select', 'place'].includes(next)) return;
+  tool = next;
+  pendingAsset = asset;
+  draft = [];
+  setView('plan');
+  document
+    .querySelectorAll('[data-tool]')
+    .forEach((b) => b.classList.toggle('selected', b.dataset.tool === tool));
+  const hints = {
+    select: 'Выберите предмет или добавьте его из библиотеки',
+    wall: 'Укажите начало и конец стены · Escape — отменить',
+    room: 'Укажите вершины комнаты · Enter — завершить · Escape — отменить',
+    rect: 'Укажите противоположные углы комнаты',
+    door: 'Нажмите на стену, чтобы добавить дверь',
+    window: 'Нажмите на стену, чтобы добавить окно',
+    socket: 'Нажмите на стену для розетки',
+    switch: 'Нажмите на стену для выключателя',
+    panel: 'Нажмите на план для светильника',
+    place: 'Нажмите на план: ' + (asset ? catalogItem(doc, asset).name : 'мебель'),
+  };
+  $('toolHint').textContent = hints[tool] || '';
+  renderDraft();
+  renderLibrary();
+  $('library').classList.remove('open');
+}
+function setView(next) {
+  view = next;
+  document
+    .querySelectorAll('[data-view]')
+    .forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+  $('plan').toggleAttribute('hidden', view !== 'plan');
+  $('tourFrame').hidden = view !== '3d';
+  document.querySelector('.zoom-controls').hidden = view !== 'plan';
+  $('toolHint').parentElement.hidden = view !== 'plan';
+  if (view === '3d') render3D();
+}
+function fitPlan() {
+  const b = bounds(doc),
+    r = $('canvasWrap').getBoundingClientRect(),
+    aspect = r.width / Math.max(r.height, 100),
+    pad = 80,
+    w = Math.max(200, b[2] - b[0] + pad * 2),
+    h = Math.max(200, b[3] - b[1] + pad * 2);
+  const W = Math.max(w, h * aspect),
+    H = W / aspect;
+  viewBox = [(b[0] + b[2] - W) / 2, (b[1] + b[3] - H) / 2, W, H];
+  baseWidth = W;
+  applyViewBox();
+}
+function applyViewBox() {
+  $('plan').setAttribute('viewBox', viewBox.join(' '));
+  $('zoomValue').textContent = Math.round((baseWidth / viewBox[2]) * 100) + '%';
+}
+function zoom(factor, at) {
+  const old = viewBox.slice(),
+    w = Math.max(150, Math.min(20000, old[2] * factor)),
+    ratio = w / old[2],
+    p = at || [old[0] + old[2] / 2, old[1] + old[3] / 2];
+  viewBox = [p[0] - (p[0] - old[0]) * ratio, p[1] - (p[1] - old[1]) * ratio, w, old[3] * ratio];
+  applyViewBox();
+}
+function planPoint(e, snap = true) {
+  const svg = $('plan'),
+    p = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse()),
+    step = $('snap').checked ? 5 : 1;
+  return snap ? [Math.round(p.x / step) * step, Math.round(p.y / step) * step] : [p.x, p.y];
+}
+const points = (ps) => ps.map((p) => p.join(',')).join(' ');
+function swatchStyle(m) {
+  let bg = m.color;
+  if (m.kind === 'fluted')
+    bg = `repeating-linear-gradient(90deg,${m.color} 0 5px,#0002 6px 8px,${m.color} 9px 12px)`;
+  if (m.kind === 'weave')
+    bg = `repeating-linear-gradient(0deg,#ffffff18 0 1px,transparent 1px 3px),repeating-linear-gradient(90deg,transparent 0 2px,#0002 2px 3px),${m.color}`;
+  if (m.kind === 'brick')
+    bg = `repeating-linear-gradient(0deg,transparent 0 11px,#c9b6a3 11px 13px),repeating-linear-gradient(90deg,transparent 0 22px,#c9b6a3 22px 24px),${m.color}`;
+  if (m.kind === 'wood')
+    bg = `repeating-linear-gradient(92deg,transparent 0 5px,#0000000a 6px 8px,transparent 9px 18px),${m.color}`;
+  return bg;
+}
+function itemArt(kind) {
+  const paths = {
+    desk: 'M4 11h34v5H4zM8 16v15M34 16v15M9 25h24',
+    chair: 'M13 5h17v12H13zM10 19h23v5H10zM21 24v8M10 32h23M12 16v6M32 16v6',
+    sofa: 'M8 8h27v13H8zM4 17h5v13H4zM34 17h5v13h-5zM9 22h25v8H9zM10 30v4M33 30v4',
+    cabinet: 'M8 4h27v28H8zM21 4v28M18 15v5M25 15v5M10 32v3M33 32v3',
+    table: 'M3 9h37v5H3zM8 14v20M35 14v20',
+    roundTable: 'M7 12c0-10 29-10 29 0S7 22 7 12M21 18v15M11 33h20',
+    plant:
+      'M13 25h16l-3 12H16zM21 25V9M21 19c-12 0-15-10-12-12 11 0 14 8 12 12M21 15c0-10 10-15 14-11 0 10-8 14-14 11',
+    glb: 'm21 2 16 8v19l-16 8-16-8V10zM5 10l16 8 16-8M21 18v19',
+  };
+  return `<svg viewBox="0 0 44 40" aria-hidden="true"><path d="${paths[kind] || paths.glb}"/></svg>`;
+}
+function renderLibrary() {
+  const filter = $('search').value.toLowerCase(),
+    content = $('libraryContent');
+  if (tab === 'catalog') {
+    content.innerHTML =
+      doc.catalogs
+        .map((c) => {
+          const rows = c.items.filter((i) => i.name.toLowerCase().includes(filter));
+          if (!rows.length) return '';
+          return (
+            `<div class="catalog-heading">${esc(c.name)}<small>${rows.length}</small></div>` +
+            rows
+              .map(
+                (i) =>
+                  `<div class="catalog-row"><button class="catalog-item ${pendingAsset === i.id ? 'selected' : ''}" data-place="${i.id}"><span class="catalog-art">${itemArt(i.kind)}</span><span><span class="catalog-name">${esc(i.name)}</span><span class="catalog-size">${i.size.map((n) => Math.round(n)).join(' × ')} см</span></span></button>${author() ? `<label class="include-label" title="Включить в выгрузку"><input type="checkbox" data-include="${i.id}" aria-label="Включить ${esc(i.name)} в тур" ${doc.selection.items.includes(i.id) ? 'checked' : ''}></label>` : ''}</div>`,
+              )
+              .join('')
+          );
+        })
+        .join('') || '<p class="empty">По этому запросу ничего не найдено.</p>';
+    content.querySelectorAll('[data-place]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          if (!author() && !doc.policy.furniture) {
+            notify('В этом туре изменение расстановки отключено');
+            return;
+          }
+          setTool('place', b.dataset.place);
+          selected = { kind: 'catalog', id: b.dataset.place };
+          renderProperties();
+        }),
+    );
+    content.querySelectorAll('[data-include]').forEach(
+      (b) =>
+        (b.onchange = () => {
+          if (!act({ type: 'selection.item', id: b.dataset.include, selected: b.checked }))
+            b.checked = !b.checked;
+        }),
+    );
+  } else if (tab === 'materials') {
+    content.innerHTML = doc.materials
+      .filter((m) => m.name.toLowerCase().includes(filter))
+      .map(
+        (m) =>
+          `<button class="material-row ${selected?.kind === 'material' && selected.id === m.id ? 'selected' : ''}" data-material="${m.id}"><span class="swatch" style="background:${swatchStyle(m)}"></span><span><span class="catalog-name">${esc(m.name)}</span><span class="catalog-size">${materialNames[m.kind]} · ${m.scaleCm} см</span></span></button>`,
+      )
+      .join('');
+    content.querySelectorAll('[data-material]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          if (selected && ['wall', 'room'].includes(selected.kind)) {
+            act({
+              type: 'surface.set',
+              target: selected.kind,
+              id: selected.id,
+              material: b.dataset.material,
+            });
+            notify('Отделка применена к выбранной поверхности');
+          } else select({ kind: 'material', id: b.dataset.material });
+        }),
+    );
+  } else {
+    const groups = [
+      ['Помещения', doc.rooms, 'room'],
+      ['Стены', doc.walls, 'wall'],
+      ['Мебель', doc.instances, 'instance'],
+      ['Оборудование', doc.fixtures, 'fixture'],
+    ];
+    content.innerHTML = groups
+      .map(
+        ([name, items, kind]) =>
+          `<div class="catalog-heading">${name}<small>${items.length}</small></div>` +
+          items
+            .map((it, i) => {
+              const label =
+                it.name ||
+                (kind === 'instance'
+                  ? catalogItem(doc, it.assetId).name
+                  : kind === 'fixture'
+                    ? kindNames[it.kind]
+                    : 'Стена ' + (i + 1));
+              return label.toLowerCase().includes(filter)
+                ? `<button class="scene-row ${selected?.kind === kind && selected.id === it.id ? 'selected' : ''}" data-select-kind="${kind}" data-select-id="${it.id}">${esc(label)}</button>`
+                : '';
+            })
+            .join(''),
+      )
+      .join('');
+    content
+      .querySelectorAll('[data-select-kind]')
+      .forEach(
+        (b) => (b.onclick = () => select({ kind: b.dataset.selectKind, id: b.dataset.selectId })),
+      );
+  }
+}
+function renderPlan() {
+  if (!doc) return;
+  const b = bounds(doc),
+    sel = selected;
+  let s = `<rect x="-100000" y="-100000" width="200000" height="200000" fill="url(#gridLarge)"/>`;
+  for (const r of doc.rooms) {
+    const m = doc.materials.find((m) => m.id === r.material),
+      xs = r.polygon.map((p) => p[0]),
+      ys = r.polygon.map((p) => p[1]),
+      cx = (Math.min(...xs) + Math.max(...xs)) / 2,
+      cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const picked = sel?.kind === 'room' && sel.id === r.id;
+    s += `<polygon points="${points(r.polygon)}" fill="${m.color}" fill-opacity=".18" stroke="${picked ? '#168469' : '#d5ded3'}" stroke-width="${picked ? 3 : 1}" data-kind="room" data-id="${r.id}"/><text x="${cx}" y="${cy + 40}" class="room-label">${esc(r.name)}</text><text x="${cx}" y="${cy + 57}" class="dimension">${(polygonArea(r.polygon) / 10000).toFixed(1)} м²</text>`;
+  }
+  for (const w of doc.walls) {
+    const chosen = sel?.kind === 'wall' && sel.id === w.id,
+      L = wallLength(w);
+    s += `<line x1="${w.a[0]}" y1="${w.a[1]}" x2="${w.b[0]}" y2="${w.b[1]}" stroke="${chosen ? '#176d5b' : '#42544a'}" stroke-width="${w.thickness}" stroke-linecap="square" data-kind="wall" data-id="${w.id}"/>`;
+    s += `<line class="hit-wall" x1="${w.a[0]}" y1="${w.a[1]}" x2="${w.b[0]}" y2="${w.b[1]}" data-kind="wall" data-id="${w.id}"/>`;
+    const mid = wallPoint(w, L / 2, -w.thickness / 2 - 14);
+    s += `<text x="${mid[0]}" y="${mid[1]}" class="dimension">${Math.round(L)} см</text>`;
+    for (const o of w.openings) {
+      const a = wallPoint(w, o.offset),
+        bb = wallPoint(w, o.offset + o.width),
+        theta = Math.atan2(w.b[1] - w.a[1], w.b[0] - w.a[0]),
+        picked = sel?.kind === 'opening' && sel.id === o.id;
+      let detail = '';
+      if (o.type === 'door') {
+        const hinge = o.hinge === 'e' ? bb : a,
+          sign = o.hinge === 'e' ? -1 : 1,
+          side = o.swing || 1,
+          start = o.hinge === 'e' ? a : bb,
+          end = [
+            hinge[0] - Math.sin(theta) * side * o.width,
+            hinge[1] + Math.cos(theta) * side * o.width,
+          ];
+        detail = `<path d="M${start} A${o.width},${o.width} 0 0 ${side * sign > 0 ? 1 : 0} ${end}" fill="none" stroke="#9fae9d" stroke-width="1.2"/><line x1="${hinge[0]}" y1="${hinge[1]}" x2="${end[0]}" y2="${end[1]}" stroke="#91a28e" stroke-width="2"/>`;
+      }
+      s += `<g data-kind="opening" data-id="${o.id}" data-wall="${w.id}" style="cursor:pointer"><line x1="${a[0]}" y1="${a[1]}" x2="${bb[0]}" y2="${bb[1]}" stroke="#f0f3e9" stroke-width="${w.thickness + 1}"/>${o.type === 'window' ? `<line x1="${a[0]}" y1="${a[1]}" x2="${bb[0]}" y2="${bb[1]}" stroke="#67a6bb" stroke-width="${picked ? 6 : 4}"/><line x1="${a[0]}" y1="${a[1]}" x2="${bb[0]}" y2="${bb[1]}" stroke="#d9eff0" stroke-width="1"/>` : detail}<line x1="${a[0]}" y1="${a[1]}" x2="${bb[0]}" y2="${bb[1]}" stroke="${picked ? '#16846966' : 'transparent'}" stroke-width="${w.thickness + 4}"/></g>`;
+    }
+    if (chosen && author())
+      for (const [end, pt] of [
+        ['a', w.a],
+        ['b', w.b],
+      ])
+        s += `<circle cx="${pt[0]}" cy="${pt[1]}" r="6" fill="white" stroke="#176d5b" stroke-width="2" data-kind="wall-end" data-id="${w.id}" data-end="${end}"/>`;
+  }
+  for (const it of doc.instances) {
+    const a = catalogItem(doc, it.assetId),
+      m = doc.materials.find((m) => m.id === a.material),
+      chosen = sel?.kind === 'instance' && sel.id === it.id,
+      [w, d] = a.size;
+    let inside = '';
+    if (['desk', 'table'].includes(a.kind))
+      inside = `<path d="M${-w / 2 + 8} ${-d / 2 + 8}v${d - 16}M${w / 2 - 8} ${-d / 2 + 8}v${d - 16}" stroke="#ffffff95" stroke-width="2"/>`;
+    if (a.kind === 'chair')
+      inside = `<path d="M${-w * 0.38} ${d * 0.25}h${w * 0.76}M0 ${-d * 0.25}v${d * 0.55}" stroke="#fff9" stroke-width="3"/>`;
+    if (a.kind === 'sofa')
+      inside = `<path d="M${-w / 2 + 12} ${-d / 2 + 15}h${w - 24}v${d - 30}M0 ${-d / 2 + 15}v${d - 25}" stroke="#fff9" fill="none" stroke-width="3"/>`;
+    s += `<g class="item" transform="translate(${it.x} ${it.y}) rotate(${it.rotation})" data-kind="instance" data-id="${it.id}"><title>${esc(a.name)}</title><rect x="${-w / 2}" y="${-d / 2}" width="${w}" height="${d}" rx="${a.kind === 'roundTable' || a.kind === 'plant' ? Math.min(w, d) / 2 : 3}" fill="${m.color}" fill-opacity=".7" stroke="${chosen ? '#087e63' : '#63796a'}" stroke-width="${chosen ? 3 : 1}"/>${inside}<line x1="0" y1="${-d / 2}" x2="0" y2="${-d / 2 - 9}" stroke="${chosen ? '#087e63' : '#63796a'}" stroke-width="2"/>${chosen ? `<circle cx="0" cy="${-d / 2 - 11}" r="4" fill="#168469"/>` : ''}</g>`;
+  }
+  for (const f of doc.fixtures) {
+    const pt = fixturePosition(doc, f),
+      chosen = sel?.kind === 'fixture' && sel.id === f.id;
+    const color = chosen ? '#077b60' : ['panel', 'spot'].includes(f.kind) ? '#c58d2e' : '#587383';
+    let mark =
+      f.kind === 'panel'
+        ? `<rect x="${-(f.width || 60) / 2}" y="${-(f.depth || 40) / 2}" width="${f.width || 60}" height="${f.depth || 40}" fill="#f4e3b183" stroke="${color}" stroke-width="${chosen ? 2.5 : 1.2}" stroke-dasharray="4 3"/>`
+        : `<circle r="${f.kind === 'spot' ? 9 : 6}" fill="white" stroke="${color}" stroke-width="2"/><path d="M-3 0h6M0-3v6" stroke="${color}"/>`;
+    s += `<g transform="translate(${pt})" data-kind="fixture" data-id="${f.id}" style="cursor:pointer">${mark}<title>${kindNames[f.kind]} · ${f.height} см</title></g>`;
+  }
+  const x0 = b[0],
+    x1 = b[2],
+    yy = b[3] + 39;
+  s += `<path d="M${x0} ${yy - 6}v12M${x0} ${yy}H${x1}M${x1} ${yy - 6}v12" stroke="#789080" stroke-width=".8"/><text x="${(x0 + x1) / 2}" y="${yy - 6}" class="dimension">${Math.round(x1 - x0) * 10} мм</text>`;
+  $('planContent').innerHTML = s;
+  applyViewBox();
+  renderDraft();
+}
+function renderDraft() {
+  let s = '';
+  if (draft.length) {
+    const pts = pointer ? [...draft, pointer] : draft;
+    s =
+      `<polyline points="${points(pts)}" fill="${tool === 'room' ? '#4e96771a' : 'none'}" stroke="#187c60" stroke-width="3" stroke-dasharray="7 4"/>` +
+      draft.map((pt) => `<circle cx="${pt[0]}" cy="${pt[1]}" r="4" fill="#187c60"/>`).join('');
+    if (tool === 'rect' && pointer) {
+      const a = draft[0],
+        b = pointer;
+      s = `<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(a[0] - b[0])}" height="${Math.abs(a[1] - b[1])}" fill="#4e96771a" stroke="#187c60" stroke-width="2"/>`;
+    }
+  }
+  if (tool === 'place' && pointer && pendingAsset) {
+    const a = catalogItem(doc, pendingAsset);
+    s = `<rect x="${pointer[0] - a.size[0] / 2}" y="${pointer[1] - a.size[1] / 2}" width="${a.size[0]}" height="${a.size[1]}" fill="#4e967733" stroke="#187c60" stroke-width="2" stroke-dasharray="5 3"/>`;
+  }
+  $('draftContent').innerHTML = s;
+}
+const field = (label, key, value, type = 'number', extra = '') =>
+  `<label class="field">${label}<input data-edit="${key}" type="${type}" value="${esc(value ?? '')}" ${extra}></label>`;
+const choose = (label, key, value, options) =>
+  `<label class="field">${label}<select data-edit="${key}">${options.map(([v, n]) => `<option value="${esc(v)}" ${String(value) === String(v) ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>`;
+const section = (name, body) =>
+  `<section class="property-section"><h3>${name}</h3>${body}</section>`;
+const grid = (html) => `<div class="property-grid">${html}</div>`;
+const materialSelect = (value, key = 'material') =>
+  choose(
+    'Материал',
+    key,
+    value,
+    doc.materials.map((m) => [m.id, m.name]),
+  );
+const deletion = (label) =>
+  `<button data-command="delete" class="danger">Удалить ${label}</button>`;
+function findSelected() {
+  if (!selected) return null;
+  const map = {
+    wall: doc.walls,
+    room: doc.rooms,
+    instance: doc.instances,
+    fixture: doc.fixtures,
+    material: doc.materials,
+    catalog: catalogItems(doc),
+  };
+  if (selected.kind === 'opening')
+    return doc.walls
+      .find((w) => w.id === selected.wallId)
+      ?.openings.find((o) => o.id === selected.id);
+  return map[selected.kind]?.find((x) => x.id === selected.id);
+}
+function projectProperties() {
+  const summary = packageSummary(doc),
+    checks = planIssues(doc);
+  return (
+    section(
+      'Состав пространства',
+      `<div class="package-counts"><span>Помещения</span><b>${doc.rooms.length}</b><span>Площадь контуров</span><b>${(doc.rooms.reduce((s, r) => s + polygonArea(r.polygon), 0) / 10000).toFixed(1)} м²</b><span>Мебель на плане</span><b>${doc.instances.length}</b></div>${author() ? '<button class="outline" data-command="rectangle">Добавить комнату прямоугольником</button>' : ''}`,
+    ) +
+    section(
+      'Освещение',
+      choose('Режим', 'light.preset', doc.lighting.preset, [
+        ['day', 'Дневной'],
+        ['work', 'Рабочий'],
+        ['sunset', 'Закат'],
+        ['evening', 'Вечер'],
+      ]) +
+        grid(
+          field(
+            'Дневной свет, K',
+            'light.naturalTemperature',
+            doc.lighting.naturalTemperature,
+            'number',
+            'min="2000" max="10000" step="100"',
+          ) +
+            field(
+              'Интенсивность',
+              'light.naturalPower',
+              doc.lighting.naturalPower,
+              'number',
+              'min="0" max="3" step="0.1"',
+            ),
+        ) +
+        field(
+          'Экспозиция',
+          'light.exposure',
+          doc.lighting.exposure,
+          'number',
+          'min="0.3" max="2" step="0.1"',
+        ),
+    ) +
+    section(
+      'Пакет для получателя',
+      `<div class="package-counts"><span>Изделий в каталоге</span><b>${summary.items}</b><span>Материалов</span><b>${summary.materials}</b><span>Вложенных файлов</span><b>${summary.files}</b></div>${author() ? `<label class="checkbox-field"><input data-policy="furniture" type="checkbox" ${doc.policy.furniture ? 'checked' : ''}>Разрешить расстановку мебели</label><label class="checkbox-field"><input data-policy="finishes" type="checkbox" ${doc.policy.finishes ? 'checked' : ''}>Разрешить смену отделки</label>` : ''}<p>Встроены выбранные изделия и необходимые им материалы. Открывается одним HTML без интернета.</p>`,
+    ) +
+    section(
+      'Проверка плана',
+      checks.length
+        ? `<ul class="issues-list">${checks
+            .slice(0, 6)
+            .map((s) => `<li>${esc(s)}</li>`)
+            .join('')}</ul><p>Проверка приблизительная, по габаритам.</p>`
+        : '<p>По базовой проверке предметов за границами комнат и пересечений со сплошными стенами не найдено.</p>',
+    ) +
+    (author()
+      ? section(
+          'Файлы',
+          `<button class="outline" data-command="new">Новый проект 6 × 4,5 м</button><p>Текущую работу можно вернуть отменой действия.</p>`,
+        )
+      : '')
+  );
+}
+function renderProperties() {
+  const item = findSelected(),
+    kind = selected?.kind;
+  $('inspectorTitle').textContent = 'Проект';
+  let s = '';
+  if (!item) {
+    selected = null;
+    s = projectProperties();
+  } else if (kind === 'wall') {
+    $('inspectorTitle').textContent = 'Стена';
+    s =
+      section(
+        'Размеры',
+        grid(
+          field('Начало X, см', 'ax', item.a[0]) +
+            field('Начало Y, см', 'ay', item.a[1]) +
+            field('Конец X, см', 'bx', item.b[0]) +
+            field('Конец Y, см', 'by', item.b[1]) +
+            field('Толщина, см', 'thickness', item.thickness) +
+            field('Высота, см', 'height', item.height),
+        ),
+      ) + section('Поверхность', materialSelect(item.material));
+    if (author())
+      s +=
+        section(
+          'Проёмы',
+          `<button class="outline" data-command="door">Добавить дверь</button><button class="outline" data-command="window" style="margin-top:8px">Добавить окно</button>`,
+        ) + deletion('стену');
+  } else if (kind === 'room') {
+    $('inspectorTitle').textContent = item.name;
+    s =
+      section(
+        'Помещение',
+        field('Название', 'name', item.name, 'text') +
+          `<p>${(polygonArea(item.polygon) / 10000).toFixed(2)} м² · ${item.polygon.length} вершин</p>`,
+      ) + section('Пол', materialSelect(item.material));
+    if (author())
+      s +=
+        section(
+          'Точный контур',
+          item.polygon
+            .map((p, i) =>
+              grid(
+                field(`X${i + 1}, см`, 'point.' + i + '.0', p[0]) +
+                  field(`Y${i + 1}, см`, 'point.' + i + '.1', p[1]),
+              ),
+            )
+            .join(''),
+        ) + deletion('контур комнаты');
+  } else if (kind === 'opening') {
+    $('inspectorTitle').textContent = item.type === 'window' ? 'Окно' : 'Дверной проём';
+    s = section(
+      'Положение и габариты',
+      field('От начала стены, см', 'offset', item.offset) +
+        grid(
+          field('Ширина, см', 'width', item.width) + field('Высота, см', 'height', item.height),
+        ) +
+        (item.type === 'window'
+          ? field('Подоконник от пола, см', 'sill', item.sill)
+          : choose('Петли', 'hinge', item.hinge || 's', [
+              ['s', 'У начала проёма'],
+              ['e', 'У конца проёма'],
+            ]) +
+            choose('Сторона открывания', 'swing', item.swing || 1, [
+              [1, 'Сторона 1'],
+              [-1, 'Сторона 2'],
+            ])),
+    );
+    if (author()) s += deletion('проём');
+  } else if (kind === 'instance') {
+    const a = catalogItem(doc, item.assetId);
+    $('inspectorTitle').textContent = a.name;
+    s =
+      section(
+        'Положение',
+        grid(
+          field('X, см', 'x', item.x) +
+            field('Y, см', 'y', item.y) +
+            field('От пола, см', 'z', item.z) +
+            field('Поворот, °', 'rotation', item.rotation),
+        ) + `<button class="outline" data-command="rotate">Повернуть на 90°</button>`,
+      ) +
+      section(
+        'Изделие',
+        `<p>${a.size.join(' × ')} см</p><p>${a.kind === 'glb' ? 'Встроенные материалы GLB' : esc(doc.materials.find((m) => m.id === a.material).name)}</p>${author() ? '<button class="outline" data-command="definition">Настроить изделие</button>' : ''}`,
+      ) +
+      deletion('предмет');
+  } else if (kind === 'fixture') {
+    $('inspectorTitle').textContent = kindNames[item.kind];
+    s = section(
+      'Размещение',
+      (item.wallId
+        ? field('От начала стены, см', 'offset', item.offset) +
+          choose('Сторона стены', 'side', item.side, [
+            [1, 'Сторона 1'],
+            [-1, 'Сторона 2'],
+          ])
+        : grid(field('X, см', 'x', item.x) + field('Y, см', 'y', item.y))) +
+        field('Высота от пола, см', 'height', item.height),
+    );
+    if (['panel', 'spot'].includes(item.kind))
+      s += section(
+        'Свет',
+        choose('Тип источника', 'kind', item.kind, [
+          ['panel', 'Панель'],
+          ['spot', 'Точечный'],
+        ]) +
+          grid(
+            field(
+              'Температура, K',
+              'temperature',
+              item.temperature,
+              'number',
+              'min="2000" max="10000" step="100"',
+            ) +
+              field(
+                'Мощность источника',
+                'power',
+                item.power,
+                'number',
+                'min="0" max="100" step="0.5"',
+              ),
+          ) +
+          (item.kind === 'panel'
+            ? grid(
+                field('Ширина, см', 'width', item.width) +
+                  field('Глубина, см', 'depth', item.depth),
+              )
+            : '') +
+          '<p>Мощность — параметр визуализации, не расчёт освещённости.</p>',
+      );
+    if (author()) s += deletion('оборудование');
+  } else if (kind === 'catalog') {
+    $('inspectorTitle').textContent = item.name;
+    s =
+      section(
+        'Изделие каталога',
+        field('Название', 'name', item.name, 'text') +
+          grid(
+            field('Ширина, см', 'size.0', item.size[0]) +
+              field('Глубина, см', 'size.1', item.size[1]) +
+              field('Высота, см', 'size.2', item.size[2]),
+          ) +
+          (item.kind === 'glb' ? '' : materialSelect(item.material)) +
+          (item.kind === 'glb'
+            ? '<p>Размер прочитан из GLB. Геометрия сохраняет исходные пропорции.</p>'
+            : '<p>Изменение размеров обновит все экземпляры этого изделия.</p>'),
+      ) +
+      section(
+        'Размещение',
+        '<button class="primary" data-command="placeSelected">Добавить на план</button>',
+      );
+  } else if (kind === 'material') {
+    $('inspectorTitle').textContent = item.name;
+    s =
+      `<div class="material-preview" style="background:${swatchStyle(item)}"></div>` +
+      section(
+        materialNames[item.kind],
+        field('Название', 'name', item.name, 'text') +
+          field('Цвет', 'color', item.color, 'color') +
+          field(
+            'Шероховатость',
+            'roughness',
+            item.roughness,
+            'number',
+            'min="0.04" max="1" step="0.01"',
+          ) +
+          grid(
+            field('Тайл, см', 'scaleCm', item.scaleCm, 'number', 'min="0.5" step="0.1"') +
+              field(
+                'Рельеф, мм',
+                'reliefMm',
+                item.reliefMm,
+                'number',
+                'min="0" max="30" step="0.1"',
+              ),
+          ),
+      ) +
+      (author()
+        ? section(
+            'Свои карты',
+            `<button class="outline" data-map="texture">Цветовая карта</button><button class="outline" data-map="normal" style="margin-top:8px">Normal · OpenGL Y+</button><button class="outline" data-map="roughnessMap" style="margin-top:8px">Карта шероховатости</button><p>PNG, JPEG или WebP. Карты и физический масштаб сохраняются в проекте.</p><label class="checkbox-field"><input type="checkbox" data-material-include="${item.id}" ${doc.selection.materials.includes(item.id) ? 'checked' : ''}>Предлагать эту отделку получателю</label>`,
+          )
+        : '');
+  }
+  $('properties').innerHTML = s;
+  if (!author())
+    $('properties')
+      .querySelectorAll('[data-edit]')
+      .forEach((el) => {
+        const key = el.dataset.edit,
+          allowed =
+            (kind === 'instance' && doc.policy.furniture) ||
+            key.startsWith('light.') ||
+            (['wall', 'room'].includes(kind) && key === 'material' && doc.policy.finishes);
+        el.disabled = !allowed;
+      });
+  if (kind === 'catalog' && item?.kind === 'glb')
+    $('properties')
+      .querySelectorAll('[data-edit^="size."]')
+      .forEach((el) => (el.disabled = true));
+  $('properties')
+    .querySelectorAll('[data-edit]')
+    .forEach((el) => (el.onchange = () => changeProperty(el)));
+  $('properties')
+    .querySelectorAll('[data-command]')
+    .forEach((b) => (b.onclick = () => command(b.dataset.command)));
+  $('properties')
+    .querySelectorAll('[data-policy]')
+    .forEach(
+      (el) =>
+        (el.onchange = () =>
+          act({ type: 'policy.update', patch: { [el.dataset.policy]: el.checked } })),
+    );
+  $('properties')
+    .querySelectorAll('[data-map]')
+    .forEach(
+      (b) =>
+        (b.onclick = () => {
+          $('textureFile').dataset.map = b.dataset.map;
+          $('textureFile').dataset.material = item.id;
+          $('textureFile').click();
+        }),
+    );
+  $('properties')
+    .querySelectorAll('[data-material-include]')
+    .forEach(
+      (el) =>
+        (el.onchange = () =>
+          act({
+            type: 'selection.material',
+            id: el.dataset.materialInclude,
+            selected: el.checked,
+          })),
+    );
+}
+function changeProperty(el) {
+  const key = el.dataset.edit,
+    item = findSelected();
+  let value = el.type === 'number' ? el.valueAsNumber : el.value;
+  if (['swing', 'side'].includes(key)) value = Number(value);
+  if (key.startsWith('light.')) {
+    act({ type: 'lighting.update', patch: { [key.slice(6)]: value } });
+    return;
+  }
+  if (!item) return;
+  let patch = { [key]: value };
+  if (selected?.kind === 'fixture' && key === 'kind')
+    patch = { kind: value, width: item.width || 60, depth: item.depth || 60 };
+  if (['ax', 'ay', 'bx', 'by'].includes(key)) {
+    const k = key[0];
+    patch = { [k]: item[k].slice() };
+    patch[k][key[1] === 'x' ? 0 : 1] = value;
+  }
+  if (key.startsWith('point.')) {
+    const [, i, j] = key.split('.');
+    patch = { polygon: clone(item.polygon) };
+    patch.polygon[i][j] = value;
+  }
+  if (key.startsWith('size.')) {
+    patch = { size: item.size.slice() };
+    patch.size[Number(key.slice(5))] = value;
+  }
+  let action = { type: selected.kind + '.update', id: item.id, patch };
+  if (selected.kind === 'opening') action.wallId = selected.wallId;
+  if (!author() && key === 'material')
+    action = { type: 'surface.set', target: selected.kind, id: item.id, material: value };
+  if (!act(action)) renderProperties();
+}
+function command(cmd) {
+  if (cmd === 'rectangle') {
+    setTool('rect');
+    return;
+  }
+  if (cmd === 'new') {
+    const p = clone(initial);
+    p.meta.id = newId('project');
+    p.meta.name = 'Новый проект';
+    p.instances = [];
+    p.fixtures = [];
+    commit(p, null);
+    fitPlan();
+    return;
+  }
+  if (!selected) return;
+  const item = findSelected();
+  if (cmd === 'definition') {
+    select({ kind: 'catalog', id: item.assetId });
+    return;
+  }
+  if (cmd === 'placeSelected') {
+    setTool('place', item.id);
+    return;
+  }
+  if (cmd === 'rotate') {
+    act({ type: 'instance.update', id: item.id, patch: { rotation: (item.rotation + 90) % 360 } });
+    return;
+  }
+  if (cmd === 'delete') {
+    const a = { type: selected.kind + '.delete', id: selected.id, wallId: selected.wallId };
+    act(a, null);
+    return;
+  }
+  if (['door', 'window'].includes(cmd) && selected.kind === 'wall')
+    addOpening(item, wallLength(item) / 2, cmd);
+}
+function addOpening(w, at, type) {
+  const width = type === 'door' ? 90 : 120,
+    H = Math.min(type === 'door' ? 210 : 150, w.height),
+    sill = type === 'window' ? Math.min(85, w.height - H) : 0;
+  const opening = {
+    id: newId(type),
+    type,
+    offset: Math.round(Math.max(0, Math.min(wallLength(w) - width, at - width / 2))),
+    width,
+    sill,
+    height: H,
+    hinge: 's',
+    swing: 1,
+  };
+  act(
+    { type: 'opening.add', wallId: w.id, opening },
+    { kind: 'opening', id: opening.id, wallId: w.id },
+  );
+}
+function finishRoom(poly = draft) {
+  if (poly.length < 3) {
+    notify('Укажите минимум три вершины комнаты');
+    return;
+  }
+  const next = clone(doc),
+    id = newId('room'),
+    floor = doc.rooms[0].material,
+    mat = doc.walls[0].material;
+  {
+    const height = doc.walls[0].height;
+    next.rooms.push({
+      id,
+      name: 'Комната ' + (doc.rooms.length + 1),
+      polygon: clone(poly),
+      material: floor,
+    });
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i],
+        b = poly[(i + 1) % poly.length],
+        same = next.walls.some(
+          (w) =>
+            (JSON.stringify(w.a) === JSON.stringify(a) &&
+              JSON.stringify(w.b) === JSON.stringify(b)) ||
+            (JSON.stringify(w.a) === JSON.stringify(b) &&
+              JSON.stringify(w.b) === JSON.stringify(a)),
+        );
+      if (!same)
+        next.walls.push({
+          id: newId('wall'),
+          a: a.slice(),
+          b: b.slice(),
+          thickness: 20,
+          height,
+          material: mat,
+          openings: [],
+        });
+    }
+  }
+  try {
+    commit(next, { kind: 'room', id });
+    setTool('select');
+    fitPlan();
+  } catch (e) {
+    notify(e.message, true);
+  }
+}
+function placeAt(pt, target) {
+  if (tool === 'wall') {
+    draft.push(pt);
+    if (draft.length === 2) {
+      const wall = {
+        id: newId('wall'),
+        a: draft[0],
+        b: draft[1],
+        thickness: 20,
+        height: doc.walls[0].height,
+        material: doc.walls[0].material,
+        openings: [],
+      };
+      if (act({ type: 'wall.add', wall }, { kind: 'wall', id: wall.id })) draft = [pt];
+      else draft = [];
+    }
+    renderDraft();
+    return;
+  }
+  if (tool === 'room') {
+    if (draft.length >= 3 && Math.hypot(pt[0] - draft[0][0], pt[1] - draft[0][1]) < 12)
+      finishRoom();
+    else {
+      draft.push(pt);
+      renderDraft();
+    }
+    return;
+  }
+  if (tool === 'rect') {
+    draft.push(pt);
+    if (draft.length === 2) {
+      const [a, b] = draft;
+      finishRoom([
+        [Math.min(a[0], b[0]), Math.min(a[1], b[1])],
+        [Math.max(a[0], b[0]), Math.min(a[1], b[1])],
+        [Math.max(a[0], b[0]), Math.max(a[1], b[1])],
+        [Math.min(a[0], b[0]), Math.max(a[1], b[1])],
+      ]);
+    }
+    return;
+  }
+  if (tool === 'place' && pendingAsset) {
+    try {
+      const next = applyAction(doc, {
+        type: 'instance.add',
+        assetId: pendingAsset,
+        x: pt[0],
+        y: pt[1],
+      });
+      commit(next, { kind: 'instance', id: next.instances.at(-1).id });
+      setTool('select');
+      if (innerWidth < 1050) $('inspector').classList.add('open');
+    } catch (e) {
+      notify(e.message, true);
+    }
+    return;
+  }
+  if (['door', 'window', 'socket', 'switch'].includes(tool)) {
+    const near = doc.walls
+      .map((w) => ({ w, ...projectOnWall(w, pt) }))
+      .sort((a, b) => a.distance - b.distance)[0];
+    if (!near || near.distance > 30) {
+      notify('Нажмите ближе к стене');
+      return;
+    }
+    if (['door', 'window'].includes(tool)) addOpening(near.w, near.offset, tool);
+    else {
+      const fixture = {
+        id: newId(tool),
+        kind: tool,
+        wallId: near.w.id,
+        offset: Math.round(near.offset),
+        side: 1,
+        height: tool === 'socket' ? 30 : 95,
+      };
+      act({ type: 'fixture.add', fixture }, { kind: 'fixture', id: fixture.id });
+    }
+    setTool('select');
+    return;
+  }
+  if (tool === 'panel') {
+    const fixture = {
+      id: newId('lamp'),
+      kind: 'panel',
+      x: pt[0],
+      y: pt[1],
+      height: doc.walls[0].height - 10,
+      width: 60,
+      depth: 60,
+      temperature: 4000,
+      power: 12,
+    };
+    act({ type: 'fixture.add', fixture }, { kind: 'fixture', id: fixture.id });
+    setTool('select');
+    return;
+  }
+  const t = target?.closest?.('[data-kind]');
+  select(t ? { kind: t.dataset.kind, id: t.dataset.id, wallId: t.dataset.wall } : null);
+}
+function render() {
+  document.body.classList.toggle('exported', !author());
+  $('projectName').value = doc.meta.name;
+  $('undo').disabled = !past.length;
+  $('redo').disabled = !future.length;
+  $('areaSummary').textContent =
+    doc.rooms.length +
+    ' пом. · ' +
+    (doc.rooms.reduce((s, r) => s + polygonArea(r.polygon), 0) / 10000).toFixed(1) +
+    ' м²';
+  const sum = packageSummary(doc);
+  $('packageSummary').textContent =
+    'В туре: ' + sum.items + ' изделий · ' + sum.materials + ' материалов';
+  renderLibrary();
+  renderPlan();
+  renderProperties();
+  if (view === '3d') render3D();
+}
+function render3D() {
+  if (!frameDirty) return;
+  frameDirty = false;
+  const token = ++frameToken;
+  $('viewLoading').hidden = false;
+  $('viewLoading').textContent = 'Готовим 3D…';
+  let snapshot;
+  try {
+    snapshot = $('tourFrame').contentWindow.TOUR?.snapshot();
+  } catch {}
+  try {
+    const html = createTourHTML(doc, bundle),
+      url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    if (frameURL) URL.revokeObjectURL(frameURL);
+    frameURL = url;
+    $('tourFrame').src = url;
+    $('tourFrame').onload = () => {
+      if (token !== frameToken) return;
+      try {
+        if (snapshot) $('tourFrame').contentWindow.TOUR?.restore(snapshot);
+      } catch {}
+    };
+  } catch (e) {
+    $('viewLoading').textContent = e.message;
+    notify(e.message, true);
+  }
+}
+function download(name, content, type) {
+  const a = document.createElement('a'),
+    url = URL.createObjectURL(new Blob([content], { type }));
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+function exportTour() {
+  try {
+    const html = createOfflineHTML(doc, bundle, appSources);
+    download(doc.meta.id + '-tour.html', html, 'text/html');
+    notify('Автономный тур выгружен. В нём ' + packageSummary(doc).items + ' изделий');
+  } catch (e) {
+    notify(e.message, true);
+  }
+}
+function saveProject() {
+  download(
+    doc.meta.id + (author() ? '-project' : '-variant') + '.json',
+    JSON.stringify(doc, null, 2),
+    'application/json',
+  );
+  notify('Файл проекта сохранён');
+}
+async function fileJSON(file) {
+  if (file.size > 72 * 1024 * 1024) throw new Error('JSON превышает 72 МБ');
+  return JSON.parse(await file.text());
+}
+const base64FromBuffer = (buffer) => {
+  const bytes = new Uint8Array(buffer);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 32768)
+    s += String.fromCharCode(...bytes.subarray(i, i + 32768));
+  return btoa(s);
+};
+async function importModel(file) {
+  if (!author()) throw new Error('Импорт доступен автору');
+  if (file.size > 30 * 1024 * 1024) throw new Error('Одна модель должна быть меньше 30 МБ');
+  const data = base64FromBuffer(await file.arrayBuffer()),
+    info = inspectGLB(data),
+    p = clone(doc),
+    id = newId('model'),
+    asset = newId('glb');
+  let cat = p.catalogs.find((c) => c.id === 'imported');
+  if (!cat) {
+    cat = { id: 'imported', name: 'Мои модели', items: [] };
+    p.catalogs.push(cat);
+  }
+  cat.items.push({
+    id,
+    name: file.name.replace(/\.glb$/i, '').slice(0, 180),
+    kind: 'glb',
+    size: info.size,
+    model: asset,
+    material: p.materials[0].id,
+    geometry: { vertices: info.vertices, triangles: info.triangles },
+  });
+  p.assets[asset] = { mime: 'model/gltf-binary', data };
+  p.selection.items.push(id);
+  commit(p, { kind: 'catalog', id });
+  notify('Модель добавлена: ' + info.size.join(' × ') + ' см');
+  setTool('place', id);
+}
+async function importCatalog(file) {
+  if (!author()) throw new Error('Импорт доступен автору');
+  const pack = await fileJSON(file);
+  if (
+    pack.schema !== 'lazy-catalog/1' ||
+    !pack.catalog ||
+    !Array.isArray(pack.materials) ||
+    !pack.assets
+  )
+    throw new Error('Нужен каталог lazy-catalog/1 с catalog, materials, assets');
+  const p = clone(doc);
+  if (p.catalogs.some((c) => c.id === pack.catalog.id))
+    throw new Error('Каталог с таким id уже есть');
+  for (const m of pack.materials) {
+    const old = p.materials.find((x) => x.id === m.id);
+    if (old && JSON.stringify(old) !== JSON.stringify(m))
+      throw new Error('Конфликт идентификатора материала ' + m.id);
+    if (!old) p.materials.push(m);
+  }
+  for (const [id, a] of Object.entries(pack.assets)) {
+    if (p.assets[id] && JSON.stringify(p.assets[id]) !== JSON.stringify(a))
+      throw new Error('Конфликт файла ' + id);
+    if (a.mime === 'model/gltf-binary') inspectGLB(a.data);
+  }
+  p.assets = { ...p.assets, ...pack.assets };
+  p.catalogs.push(pack.catalog);
+  p.selection.items.push(...pack.catalog.items.map((i) => i.id));
+  assertAssetDimensions(assertProject(p));
+  commit(p, null);
+  notify('Каталог добавлен');
+}
+function bind() {
+  document
+    .querySelectorAll('[data-tool]')
+    .forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
+  document
+    .querySelectorAll('[data-view]')
+    .forEach((b) => (b.onclick = () => setView(b.dataset.view)));
+  document.querySelectorAll('[data-tab]').forEach(
+    (b) =>
+      (b.onclick = () => {
+        tab = b.dataset.tab;
+        document.querySelectorAll('[data-tab]').forEach((t) => {
+          t.classList.toggle('active', t === b);
+          t.setAttribute('aria-selected', t === b ? 'true' : 'false');
+        });
+        renderLibrary();
+      }),
+  );
+  $('search').oninput = renderLibrary;
+  $('projectName').onchange = (e) => act({ type: 'meta.update', patch: { name: e.target.value } });
+  $('undo').onclick = () => undo();
+  $('redo').onclick = () => undo(true);
+  $('fitPlan').onclick = fitPlan;
+  $('zoomIn').onclick = () => zoom(0.8);
+  $('zoomOut').onclick = () => zoom(1.25);
+  $('exportTour').onclick = exportTour;
+  $('mobileExport').onclick = exportTour;
+  $('saveProject').onclick = saveProject;
+  $('openProject').onclick = () => $('projectFile').click();
+  $('importModel').onclick = () => $('modelFile').click();
+  $('importCatalog').onclick = () => $('catalogFile').click();
+  $('projectFile').onchange = async (e) => {
+    try {
+      if (e.target.files[0]) {
+        const p = restoreVariant(
+          doc,
+          assertAssetDimensions(assertProject(await fileJSON(e.target.files[0]))),
+        );
+        commit(p, null);
+        fitPlan();
+        notify('Проект открыт');
+      }
+    } catch (err) {
+      notify(err.message, true);
+    } finally {
+      e.target.value = '';
+    }
+  };
+  for (const [id, fn] of [
+    ['modelFile', importModel],
+    ['catalogFile', importCatalog],
+  ])
+    $(id).onchange = async (e) => {
+      try {
+        if (e.target.files[0]) await fn(e.target.files[0]);
+      } catch (err) {
+        notify(err.message, true);
+      } finally {
+        e.target.value = '';
+      }
+    };
+  $('textureFile').onchange = async (e) => {
+    try {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (
+        file.size > 8 * 1024 * 1024 ||
+        !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)
+      )
+        throw new Error('Нужна карта PNG/JPEG/WebP до 8 МБ');
+      const bitmap = await createImageBitmap(file);
+      if (bitmap.width > 8192 || bitmap.height > 8192) {
+        bitmap.close();
+        throw new Error('Максимальная сторона карты — 8192 px');
+      }
+      bitmap.close();
+      const p = clone(doc),
+        key = newId('texture'),
+        m = p.materials.find((m) => m.id === e.target.dataset.material);
+      if (!m) throw new Error('Материал не найден');
+      p.assets[key] = { mime: file.type, data: base64FromBuffer(await file.arrayBuffer()) };
+      m[e.target.dataset.map] = key;
+      commit(p);
+      notify('Карта добавлена в материал');
+    } catch (err) {
+      notify(err.message, true);
+    } finally {
+      e.target.value = '';
+    }
+  };
+  $('showLibrary').onclick = () => {
+    $('library').classList.toggle('open');
+    $('inspector').classList.remove('open');
+  };
+  $('showInspector').onclick = () => {
+    $('inspector').classList.toggle('open');
+    $('library').classList.remove('open');
+  };
+  $('closeLibrary').onclick = () => $('library').classList.remove('open');
+  $('closeInspector').onclick = () => $('inspector').classList.remove('open');
+  $('helpButton').onclick = () => $('helpDialog').showModal();
+  $('closeHelp').onclick = () => $('helpDialog').close();
+  $('issuesButton').onclick = () => {
+    select(null);
+    $('inspector').classList.add('open');
+    const issues = planIssues(doc);
+    notify(
+      issues.length ? issues.join('\n') : 'Базовая проверка плана завершена без замечаний',
+      !!issues.length,
+    );
+  };
+  const svg = $('plan');
+  svg.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault();
+      zoom(e.deltaY > 0 ? 1.12 : 0.89, planPoint(e, false));
+    },
+    { passive: false },
+  );
+  svg.addEventListener('pointerdown', (e) => {
+    if (e.button === 2) return;
+    svg.focus();
+    const pt = planPoint(e),
+      raw = planPoint(e, false),
+      target = e.target.closest?.('[data-kind]');
+    svg.setPointerCapture(e.pointerId);
+    if (e.button === 1 || spaceDown) {
+      drag = { type: 'pan', at: raw, box: viewBox.slice(), screen: [e.clientX, e.clientY] };
+      return;
+    }
+    if (
+      tool === 'select' &&
+      target &&
+      ['instance', 'wall-end', 'fixture'].includes(target.dataset.kind)
+    ) {
+      const kind = target.dataset.kind,
+        id = target.dataset.id;
+      select({ kind: kind === 'wall-end' ? 'wall' : kind, id });
+      if (
+        (kind === 'instance' && (author() || doc.policy.furniture)) ||
+        (author() && kind === 'wall-end') ||
+        (author() && kind === 'fixture')
+      )
+        drag = {
+          type: kind,
+          id,
+          endpoint: target.dataset.end,
+          at: pt,
+          original: clone(doc),
+          moved: false,
+        };
+      return;
+    }
+    placeAt(pt, e.target);
+  });
+  svg.addEventListener('pointermove', (e) => {
+    pointer = planPoint(e);
+    $('coordinates').textContent = 'X ' + pointer[0] + ' · Y ' + pointer[1] + ' см';
+    if (drag?.type === 'pan') {
+      const r = svg.getBoundingClientRect();
+      viewBox = [
+        drag.box[0] - ((e.clientX - drag.screen[0]) / r.width) * drag.box[2],
+        drag.box[1] - ((e.clientY - drag.screen[1]) / r.height) * drag.box[3],
+        drag.box[2],
+        drag.box[3],
+      ];
+      applyViewBox();
+      return;
+    }
+    if (drag) {
+      const p = clone(drag.original),
+        dx = pointer[0] - drag.at[0],
+        dy = pointer[1] - drag.at[1];
+      if (Math.abs(dx) + Math.abs(dy) < 2) return;
+      drag.moved = true;
+      if (drag.type === 'instance') {
+        const it = p.instances.find((i) => i.id === drag.id);
+        it.x += dx;
+        it.y += dy;
+      }
+      if (drag.type === 'wall-end')
+        p.walls.find((w) => w.id === drag.id)[drag.endpoint] = pointer.slice();
+      if (drag.type === 'fixture') {
+        const f = p.fixtures.find((f) => f.id === drag.id);
+        if (f.wallId)
+          f.offset = Math.round(
+            projectOnWall(
+              p.walls.find((w) => w.id === f.wallId),
+              pointer,
+            ).offset,
+          );
+        else {
+          f.x += dx;
+          f.y += dy;
+        }
+      }
+      doc = p;
+      renderPlan();
+      return;
+    }
+    renderDraft();
+  });
+  const release = () => {
+    if (drag && drag.type !== 'pan') {
+      const candidate = doc,
+        original = drag.original;
+      doc = original;
+      if (drag.moved) {
+        try {
+          commit(candidate);
+        } catch (e) {
+          notify(e.message, true);
+          render();
+        }
+      }
+    }
+    drag = null;
+  };
+  svg.addEventListener('pointerup', release);
+  svg.addEventListener('pointercancel', () => {
+    if (drag?.original) {
+      doc = drag.original;
+      render();
+    }
+    drag = null;
+  });
+  addEventListener('keydown', (e) => {
+    if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName) || $('helpDialog').open)
+      return;
+    if (e.code === 'Space') {
+      spaceDown = true;
+      e.preventDefault();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      undo(e.shiftKey);
+      return;
+    }
+    if (e.key === 'Escape') {
+      setTool('select');
+      selected = null;
+      renderProperties();
+      renderPlan();
+    }
+    if (e.key === 'Enter' && tool === 'room') {
+      e.preventDefault();
+      finishRoom();
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (selected && !['catalog', 'material'].includes(selected.kind)) {
+        e.preventDefault();
+        command('delete');
+      }
+    }
+    if (
+      selected?.kind === 'instance' &&
+      ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)
+    ) {
+      e.preventDefault();
+      const it = findSelected(),
+        step = $('snap').checked ? 5 : 1;
+      act({
+        type: 'instance.update',
+        id: it.id,
+        patch: {
+          x: it.x + (e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0),
+          y: it.y + (e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0),
+        },
+      });
+    }
+    if (e.key.toLowerCase() === 'v') setTool('select');
+    if (e.key.toLowerCase() === 'w') setTool('wall');
+  });
+  addEventListener('keyup', (e) => {
+    if (e.code === 'Space') spaceDown = false;
+  });
+  addEventListener('pagehide', () => {
+    if (saveTimer) persistLocal();
+  });
+  addEventListener('message', (e) => {
+    if (e.source !== $('tourFrame').contentWindow) return;
+    if (e.data?.type === 'lazy-render-ready') {
+      $('viewLoading').hidden = true;
+    } else if (e.data?.type === 'lazy-render-error') {
+      $('viewLoading').hidden = false;
+      $('viewLoading').textContent = '3D недоступен: ' + e.data.message;
+    }
+  });
+  new ResizeObserver(() => {
+    if (view === 'plan') applyViewBox();
+  }).observe($('canvasWrap'));
+}
+async function boot() {
+  try {
+    const seed = window.LAZY_EMBED || (await (await fetch('/api/bootstrap')).json());
+    doc = assertProject(seed.project);
+    bundle = seed.bundle;
+    appSources = seed.app;
+    initial = clone(doc);
+    try {
+      const raw = localStorage.getItem(storageKey());
+      if (raw) doc = restoreVariant(doc, JSON.parse(raw));
+    } catch {
+      /* Keep the validated source when a local cache is incompatible. */
+    }
+    bind();
+    render();
+    fitPlan();
+    if (!author()) setView('3d');
+    $('saveState').textContent = author()
+      ? 'Проект открыт · сантиметры'
+      : 'Автономный тур · выбранный каталог';
+    window.LAZY = {
+      getProject: () => clone(doc),
+      dispatch: act,
+      select,
+      setView,
+      exportHTML: () => createOfflineHTML(doc, bundle, appSources),
+      validate: () => validateProject(doc),
+      setTool,
+    };
+  } catch (e) {
+    $('saveState').textContent = 'Не удалось открыть проект';
+    notify(e.message, true);
+  }
+}
 boot();
