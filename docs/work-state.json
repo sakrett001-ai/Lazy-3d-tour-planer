@@ -14,7 +14,9 @@
     "browserScenarios": 12,
     "pageErrors": 0,
     "offlineExternalRequests": 0,
-    "report": "docs/verification.md"
+    "report": "docs/verification.md",
+    "hostedCI": "Failed before any job step; no job log available; cause not confirmed",
+    "codeCommit": "111c1ebb35cbbe5a4bbaaab84647d2875f8b02e3"
   },
   "next": "Develop roadmap items against the shared project contract",
   "clientAssetsIncluded": false
